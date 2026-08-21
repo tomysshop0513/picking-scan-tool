@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>出荷ピッキング照合ツール(プロトタイプ)</title>
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.19.1/umd/index.min.js"></script>
 <style>
   :root{
     --ink:#132a2e;
@@ -324,55 +325,49 @@ function renderHome() {
 }
 renderHome();
 
-/* ---------- カメラ / バーコード検出 ---------- */
-let activeStreams = {};
-let detectLoopId = null;
-const detectorSupported = "BarcodeDetector" in window;
-let barcodeDetector = detectorSupported ? new BarcodeDetector({ formats: ["ean_13","ean_8","code_128","upc_a","upc_e","code_39"] }) : null;
+/* ---------- カメラ / バーコード検出 (ZXing) ---------- */
+const zxingReady = typeof ZXing !== "undefined";
+let readers = {}; // videoId -> ZXing.BrowserMultiFormatReader
+
+function makeReader() {
+  if (!zxingReady) return null;
+  const hints = new Map();
+  hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+    ZXing.BarcodeFormat.EAN_13,
+    ZXing.BarcodeFormat.EAN_8,
+    ZXing.BarcodeFormat.UPC_A,
+    ZXing.BarcodeFormat.UPC_E,
+    ZXing.BarcodeFormat.CODE_128,
+    ZXing.BarcodeFormat.CODE_39,
+  ]);
+  return new ZXing.BrowserMultiFormatReader(hints);
+}
 
 async function startCamera(videoId, statusId, onDetect) {
-  const video = document.getElementById(videoId);
   const status = document.getElementById(statusId);
+  if (!zxingReady) {
+    status.textContent = "バーコード読取ライブラリを読み込めませんでした。下の入力欄をご利用ください。";
+    return;
+  }
+  const reader = makeReader();
+  readers[videoId] = reader;
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-    activeStreams[videoId] = stream;
-    video.srcObject = stream;
-    await video.play();
-    if (!detectorSupported) {
-      status.textContent = "このブラウザはカメラ自動認識に非対応です。下の入力欄をご利用ください。";
-      return;
-    }
     status.textContent = "バーコードを枠内に合わせてください";
-    loopDetect(video, onDetect);
+    await reader.decodeFromConstraints(
+      { video: { facingMode: "environment" } },
+      videoId,
+      (result, err) => {
+        if (result) onDetect(result.getText());
+      }
+    );
   } catch (e) {
     status.textContent = "カメラを起動できません。下の入力欄からコードを入力してください。";
   }
 }
 
-function loopDetect(video, onDetect) {
-  let stopped = false;
-  async function tick() {
-    if (stopped) return;
-    try {
-      const codes = await barcodeDetector.detect(video);
-      if (codes.length > 0) {
-        onDetect(codes[0].rawValue);
-      }
-    } catch (e) {}
-    detectLoopId = requestAnimationFrame(tick);
-  }
-  tick();
-  video._stopDetect = () => { stopped = true; };
-}
-
 function stopAllCameras() {
-  if (detectLoopId) cancelAnimationFrame(detectLoopId);
-  Object.keys(activeStreams).forEach(id => {
-    const v = document.getElementById(id);
-    if (v && v._stopDetect) v._stopDetect();
-    activeStreams[id].getTracks().forEach(t => t.stop());
-  });
-  activeStreams = {};
+  Object.values(readers).forEach(r => { try { r.reset(); } catch (e) {} });
+  readers = {};
 }
 
 /* ---------- 音フィードバック ---------- */
