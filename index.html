@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>出荷ピッキング照合ツール(プロトタイプ)</title>
+<style>
+  :root{
+    --ink:#132a2e;
+    --paper:#f3f6f4;
+    --line:#c8d3cf;
+    --brand:#0f6e5c;
+    --brand-dark:#0a4d40;
+    --ok:#1c8a4c;
+    --ok-bg:#e4f6ea;
+    --ng:#c23b2f;
+    --ng-bg:#fbe7e4;
+    --amber:#b8791a;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:"Hiragino Sans","Yu Gothic",system-ui,-apple-system,sans-serif;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .app{max-width:520px;margin:0 auto;min-height:100vh;background:#fff;display:flex;flex-direction:column;box-shadow:0 0 40px rgba(0,0,0,0.06);}
+  header{
+    background:var(--brand-dark);
+    color:#fff;
+    padding:18px 20px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+  }
+  header .brand{font-size:15px;letter-spacing:.04em;opacity:.85;}
+  header h1{font-size:19px;margin:2px 0 0;font-weight:700;}
+  header .back{
+    background:rgba(255,255,255,.15);
+    border:none;color:#fff;border-radius:10px;
+    padding:10px 14px;font-size:15px;font-weight:600;
+  }
+  main{flex:1;padding:20px;padding-bottom:36px;}
+  .screen{display:none;}
+  .screen.active{display:block;}
+
+  /* Home */
+  .order-card{
+    border:1px solid var(--line);
+    border-radius:16px;
+    padding:16px 18px;
+    margin-bottom:12px;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    background:#fff;
+  }
+  .order-card .meta{font-size:13px;color:#5a6b66;margin-top:4px;}
+  .order-card .id{font-size:17px;font-weight:700;}
+  .pill{
+    font-size:12px;font-weight:700;padding:5px 10px;border-radius:999px;
+    background:var(--ok-bg);color:var(--ok);
+  }
+  .pill.done{background:#eee;color:#888;}
+  .primary-btn{
+    width:100%;
+    background:var(--brand);
+    color:#fff;border:none;border-radius:14px;
+    padding:18px;font-size:18px;font-weight:700;
+    margin-top:18px;
+  }
+  .primary-btn:active{background:var(--brand-dark);}
+  .secondary-btn{
+    width:100%;background:#eef2f0;color:var(--brand-dark);
+    border:none;border-radius:14px;padding:16px;font-size:16px;font-weight:700;margin-top:10px;
+  }
+  .hint{font-size:13px;color:#5a6b66;line-height:1.6;margin-top:6px;}
+
+  /* Scan screen */
+  .scan-box{
+    position:relative;
+    border-radius:18px;overflow:hidden;
+    background:#0b1512;
+    aspect-ratio:1/1;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .scan-box video{width:100%;height:100%;object-fit:cover;}
+  .scan-frame{
+    position:absolute;inset:14%;
+    border:3px solid rgba(255,255,255,.85);
+    border-radius:14px;
+    box-shadow:0 0 0 999px rgba(0,0,0,.35);
+  }
+  .scan-status{
+    position:absolute;bottom:14px;left:14px;right:14px;
+    text-align:center;color:#fff;font-size:14px;
+    background:rgba(0,0,0,.35);border-radius:10px;padding:8px;
+  }
+  .flash-ok, .flash-ng{
+    position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    font-size:64px;color:#fff;font-weight:800;opacity:0;
+  }
+  .flash-ok{background:rgba(28,138,76,.92);}
+  .flash-ng{background:rgba(194,59,47,.92);}
+  .flash-ok.show,.flash-ng.show{opacity:1;transition:opacity .05s;}
+  .flash-ok.hide,.flash-ng.hide{opacity:0;transition:opacity .5s;}
+
+  .manual-entry{margin-top:14px;display:flex;gap:8px;}
+  .manual-entry input{
+    flex:1;border:1px solid var(--line);border-radius:12px;padding:14px;font-size:16px;
+  }
+  .manual-entry button{
+    background:var(--ink);color:#fff;border:none;border-radius:12px;padding:0 18px;font-weight:700;
+  }
+
+  .step-label{font-size:13px;font-weight:700;color:var(--brand);letter-spacing:.04em;margin-bottom:4px;}
+  .order-title{font-size:20px;font-weight:800;margin:0 0 2px;}
+  .order-sub{font-size:13px;color:#5a6b66;margin-bottom:16px;}
+
+  /* Picking list */
+  .item-row{
+    border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:10px;
+    display:flex;justify-content:space-between;align-items:center;background:#fff;
+  }
+  .item-row.done{background:var(--ok-bg);border-color:#bfe4cc;}
+  .item-name{font-size:15px;font-weight:700;}
+  .item-jan{font-size:12px;color:#5a6b66;margin-top:2px;font-family:monospace;}
+  .item-qty{font-size:15px;font-weight:800;color:var(--ink);}
+  .item-qty.complete{color:var(--ok);}
+  .check{
+    width:26px;height:26px;border-radius:50%;border:2px solid var(--line);
+    display:flex;align-items:center;justify-content:center;font-size:14px;color:#fff;margin-left:10px;flex-shrink:0;
+  }
+  .check.on{background:var(--ok);border-color:var(--ok);}
+
+  .msg-banner{
+    border-radius:12px;padding:12px 14px;font-size:14px;font-weight:700;margin-bottom:14px;
+  }
+  .msg-banner.ng{background:var(--ng-bg);color:var(--ng);}
+  .msg-banner.amber{background:#fdf1de;color:var(--amber);}
+
+  .complete-panel{
+    text-align:center;padding:40px 10px;
+  }
+  .complete-panel .circle{
+    width:96px;height:96px;border-radius:50%;background:var(--ok);
+    display:flex;align-items:center;justify-content:center;margin:0 auto 18px;
+    color:#fff;font-size:48px;
+  }
+  .complete-panel h2{font-size:22px;margin:0 0 6px;}
+  .complete-panel p{color:#5a6b66;font-size:14px;}
+
+  .footer-note{
+    font-size:12px;color:#8a9a95;text-align:center;padding:14px 20px 24px;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div>
+      <div class="brand">出荷ピッキング照合ツール</div>
+      <h1 id="headerTitle">本日の出荷リスト</h1>
+    </div>
+    <button class="back" id="backBtn" style="display:none;">戻る</button>
+  </header>
+
+  <main>
+
+    <!-- HOME -->
+    <section class="screen active" id="screen-home">
+      <div id="orderList"></div>
+      <p class="hint">各注文をタップすると、発送ラベルのスキャンから開始します。</p>
+    </section>
+
+    <!-- SCAN ORDER LABEL -->
+    <section class="screen" id="screen-scan-order">
+      <div class="step-label">STEP 1 / 発送ラベルをスキャン</div>
+      <div class="order-title">発送ラベルのバーコードを読み取ってください</div>
+      <div class="scan-box" id="scanBoxOrder">
+        <video id="videoOrder" playsinline muted></video>
+        <div class="scan-frame"></div>
+        <div class="scan-status" id="scanStatusOrder">カメラを起動しています…</div>
+        <div class="flash-ok" id="flashOkOrder">OK</div>
+        <div class="flash-ng" id="flashNgOrder">NG</div>
+      </div>
+      <div class="manual-entry">
+        <input type="text" id="manualOrder" placeholder="読み取れない場合はコードを入力">
+        <button id="manualOrderBtn">照合</button>
+      </div>
+    </section>
+
+    <!-- PICKING -->
+    <section class="screen" id="screen-picking">
+      <div class="step-label" id="pickStepLabel">STEP 2 / 商品をピッキング</div>
+      <div class="order-title" id="pickOrderTitle">注文 #0000</div>
+      <div class="order-sub" id="pickOrderSub"></div>
+
+      <div id="pickBanner"></div>
+
+      <div id="itemList"></div>
+
+      <div class="scan-box" style="margin-top:16px;">
+        <video id="videoItem" playsinline muted></video>
+        <div class="scan-frame"></div>
+        <div class="scan-status" id="scanStatusItem">カメラを起動しています…</div>
+        <div class="flash-ok" id="flashOkItem">OK</div>
+        <div class="flash-ng" id="flashNgItem">NG</div>
+      </div>
+      <div class="manual-entry">
+        <input type="text" id="manualItem" placeholder="読み取れない場合はJANコードを入力">
+        <button id="manualItemBtn">照合</button>
+      </div>
+    </section>
+
+    <!-- COMPLETE -->
+    <section class="screen" id="screen-complete">
+      <div class="complete-panel">
+        <div class="circle">✓</div>
+        <h2>梱包完了</h2>
+        <p id="completeSub">この注文のピッキング・照合がすべて完了しました。</p>
+        <button class="primary-btn" id="nextOrderBtn">出荷リストに戻る</button>
+      </div>
+    </section>
+
+  </main>
+
+  <p class="footer-note">プロトタイプ版・サンプルデータで動作します。実運用ではRMS/CSVから注文データを取り込みます。</p>
+</div>
+
+<script>
+/* ---------- サンプルデータ ---------- */
+const ORDERS = [
+  {
+    id: "ORD-20260821-001",
+    barcode: "ORD20260821001",
+    customer: "楽天 山田様 / 東京都",
+    channel: "楽天市場",
+    items: [
+      { name: "ハンドクリーム 30g", jan: "4901234500011", qty: 2 },
+      { name: "アロマキャンドル ラベンダー", jan: "4901234500028", qty: 1 },
+    ],
+  },
+  {
+    id: "ORD-20260821-002",
+    barcode: "ORD20260821002",
+    customer: "Yahoo 佐藤様 / 大阪府",
+    channel: "Yahooショッピング",
+    items: [
+      { name: "オーガニックせっけん 3個セット", jan: "4901234500035", qty: 1 },
+    ],
+  },
+  {
+    id: "ORD-20260821-003",
+    barcode: "ORD20260821003",
+    customer: "楽天 鈴木様 / 福岡県",
+    channel: "楽天市場",
+    items: [
+      { name: "ハンドクリーム 30g", jan: "4901234500011", qty: 1 },
+      { name: "バスソルト 200g", jan: "4901234500042", qty: 2 },
+      { name: "アロマキャンドル ラベンダー", jan: "4901234500028", qty: 1 },
+    ],
+  },
+];
+
+let orderStatus = {}; // id -> "pending" | "done"
+ORDERS.forEach(o => orderStatus[o.id] = "pending");
+
+let currentOrder = null;
+let pickedCount = {}; // jan -> count
+
+/* ---------- 画面切り替え ---------- */
+const screens = {
+  home: document.getElementById("screen-home"),
+  scanOrder: document.getElementById("screen-scan-order"),
+  picking: document.getElementById("screen-picking"),
+  complete: document.getElementById("screen-complete"),
+};
+const headerTitle = document.getElementById("headerTitle");
+const backBtn = document.getElementById("backBtn");
+
+function showScreen(name, title, showBack) {
+  Object.values(screens).forEach(s => s.classList.remove("active"));
+  screens[name].classList.add("active");
+  headerTitle.textContent = title;
+  backBtn.style.display = showBack ? "inline-block" : "none";
+  stopAllCameras();
+  if (name === "scanOrder") startCamera("videoOrder", "scanStatusOrder", onOrderScan);
+  if (name === "picking") startCamera("videoItem", "scanStatusItem", onItemScan);
+}
+
+backBtn.addEventListener("click", () => {
+  renderHome();
+  showScreen("home", "本日の出荷リスト", false);
+});
+
+/* ---------- ホーム画面 ---------- */
+function renderHome() {
+  const list = document.getElementById("orderList");
+  list.innerHTML = "";
+  ORDERS.forEach(o => {
+    const done = orderStatus[o.id] === "done";
+    const div = document.createElement("div");
+    div.className = "order-card";
+    div.innerHTML = `
+      <div>
+        <div class="id">${o.id}</div>
+        <div class="meta">${o.channel} ・ ${o.customer} ・ ${o.items.length}品目</div>
+      </div>
+      <div class="pill ${done ? "done" : ""}">${done ? "完了" : "未処理"}</div>
+    `;
+    if (!done) {
+      div.addEventListener("click", () => {
+        currentOrder = o;
+        pickedCount = {};
+        o.items.forEach(it => pickedCount[it.jan] = 0);
+        showScreen("scanOrder", "発送ラベルをスキャン", true);
+      });
+    }
+    list.appendChild(div);
+  });
+}
+renderHome();
+
+/* ---------- カメラ / バーコード検出 ---------- */
+let activeStreams = {};
+let detectLoopId = null;
+const detectorSupported = "BarcodeDetector" in window;
+let barcodeDetector = detectorSupported ? new BarcodeDetector({ formats: ["ean_13","ean_8","code_128","upc_a","upc_e","code_39"] }) : null;
+
+async function startCamera(videoId, statusId, onDetect) {
+  const video = document.getElementById(videoId);
+  const status = document.getElementById(statusId);
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+    activeStreams[videoId] = stream;
+    video.srcObject = stream;
+    await video.play();
+    if (!detectorSupported) {
+      status.textContent = "このブラウザはカメラ自動認識に非対応です。下の入力欄をご利用ください。";
+      return;
+    }
+    status.textContent = "バーコードを枠内に合わせてください";
+    loopDetect(video, onDetect);
+  } catch (e) {
+    status.textContent = "カメラを起動できません。下の入力欄からコードを入力してください。";
+  }
+}
+
+function loopDetect(video, onDetect) {
+  let stopped = false;
+  async function tick() {
+    if (stopped) return;
+    try {
+      const codes = await barcodeDetector.detect(video);
+      if (codes.length > 0) {
+        onDetect(codes[0].rawValue);
+      }
+    } catch (e) {}
+    detectLoopId = requestAnimationFrame(tick);
+  }
+  tick();
+  video._stopDetect = () => { stopped = true; };
+}
+
+function stopAllCameras() {
+  if (detectLoopId) cancelAnimationFrame(detectLoopId);
+  Object.keys(activeStreams).forEach(id => {
+    const v = document.getElementById(id);
+    if (v && v._stopDetect) v._stopDetect();
+    activeStreams[id].getTracks().forEach(t => t.stop());
+  });
+  activeStreams = {};
+}
+
+/* ---------- 音フィードバック ---------- */
+function beep(freq, dur, type="sine") {
+  try {
+    const ctx = beep._ctx || (beep._ctx = new (window.AudioContext || window.webkitAudioContext)());
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = type;
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.2, ctx.currentTime);
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + dur);
+  } catch(e){}
+}
+function okSound(){ beep(880, 0.12); }
+function ngSound(){ beep(180, 0.35, "square"); }
+
+function flash(boxPrefix, ok) {
+  const el = document.getElementById((ok ? "flashOk" : "flashNg") + boxPrefix);
+  el.classList.remove("hide");
+  el.classList.add("show");
+  setTimeout(() => {
+    el.classList.remove("show");
+    el.classList.add("hide");
+  }, 350);
+}
+
+/* ---------- STEP1: 発送ラベル照合 ---------- */
+function onOrderScan(code) {
+  handleOrderCode(code);
+}
+document.getElementById("manualOrderBtn").addEventListener("click", () => {
+  const v = document.getElementById("manualOrder").value.trim();
+  if (v) handleOrderCode(v);
+});
+
+let orderScanLock = false;
+function handleOrderCode(code) {
+  if (orderScanLock) return;
+  if (!currentOrder) return;
+  if (code === currentOrder.barcode) {
+    orderScanLock = true;
+    okSound();
+    flash("Order", true);
+    setTimeout(() => {
+      orderScanLock = false;
+      renderPicking();
+      showScreen("picking", "商品をピッキング", true);
+    }, 400);
+  } else {
+    ngSound();
+    flash("Order", false);
+    document.getElementById("scanStatusOrder").textContent = "この注文のラベルではありません。番号を確認してください。";
+  }
+}
+
+/* ---------- STEP2: ピッキング照合 ---------- */
+function renderPicking() {
+  document.getElementById("pickOrderTitle").textContent = currentOrder.id;
+  document.getElementById("pickOrderSub").textContent = `${currentOrder.channel} ・ ${currentOrder.customer}`;
+  document.getElementById("pickBanner").innerHTML = "";
+  renderItemList();
+}
+
+function renderItemList() {
+  const wrap = document.getElementById("itemList");
+  wrap.innerHTML = "";
+  currentOrder.items.forEach(it => {
+    const got = pickedCount[it.jan] || 0;
+    const complete = got >= it.qty;
+    const row = document.createElement("div");
+    row.className = "item-row" + (complete ? " done" : "");
+    row.innerHTML = `
+      <div>
+        <div class="item-name">${it.name}</div>
+        <div class="item-jan">JAN: ${it.jan}</div>
+      </div>
+      <div style="display:flex;align-items:center;">
+        <div class="item-qty ${complete ? "complete" : ""}">${got} / ${it.qty}</div>
+        <div class="check ${complete ? "on" : ""}">${complete ? "✓" : ""}</div>
+      </div>
+    `;
+    wrap.appendChild(row);
+  });
+}
+
+function onItemScan(code) {
+  handleItemCode(code);
+}
+document.getElementById("manualItemBtn").addEventListener("click", () => {
+  const v = document.getElementById("manualItem").value.trim();
+  if (v) handleItemCode(v);
+  document.getElementById("manualItem").value = "";
+});
+
+let itemScanLock = false;
+function handleItemCode(code) {
+  if (itemScanLock || !currentOrder) return;
+  const item = currentOrder.items.find(it => it.jan === code);
+  const banner = document.getElementById("pickBanner");
+
+  if (!item) {
+    ngSound();
+    flash("Item", false);
+    banner.innerHTML = `<div class="msg-banner ng">この商品はこの注文に含まれていません(JAN: ${code})</div>`;
+    return;
+  }
+  const got = pickedCount[item.jan] || 0;
+  if (got >= item.qty) {
+    ngSound();
+    flash("Item", false);
+    banner.innerHTML = `<div class="msg-banner amber">「${item.name}」は既に必要数スキャン済みです(数量超過に注意)</div>`;
+    return;
+  }
+
+  itemScanLock = true;
+  pickedCount[item.jan] = got + 1;
+  okSound();
+  flash("Item", true);
+  banner.innerHTML = `<div class="msg-banner" style="background:#e4f6ea;color:#1c8a4c;">「${item.name}」OK (${pickedCount[item.jan]} / ${item.qty})</div>`;
+  renderItemList();
+  setTimeout(() => { itemScanLock = false; }, 300);
+
+  const allDone = currentOrder.items.every(it => (pickedCount[it.jan] || 0) >= it.qty);
+  if (allDone) {
+    orderStatus[currentOrder.id] = "done";
+    setTimeout(() => {
+      document.getElementById("completeSub").textContent =
+        `${currentOrder.id} のピッキング・照合が完了しました。梱包して郵便局への持ち込み分にまとめてください。`;
+      showScreen("complete", "梱包完了", false);
+    }, 500);
+  }
+}
+
+document.getElementById("nextOrderBtn").addEventListener("click", () => {
+  currentOrder = null;
+  renderHome();
+  showScreen("home", "本日の出荷リスト", false);
+});
+</script>
+</body>
+</html>
