@@ -466,8 +466,10 @@ document.getElementById("manualOrderBtn").addEventListener("click", () => {
 });
 
 let orderScanLock = false;
+let orderPauseUntil = 0;
 function handleOrderCode(code) {
   if (orderScanLock) return;
+  if (Date.now() < orderPauseUntil) return;
   if (!currentOrder) return;
   if (code === currentOrder.barcode) {
     orderScanLock = true;
@@ -481,7 +483,11 @@ function handleOrderCode(code) {
   } else {
     ngSound();
     flash("Order", false);
+    orderPauseUntil = Date.now() + 1200;
     document.getElementById("scanStatusOrder").textContent = "この注文のラベルではありません。番号を確認してください。";
+    setTimeout(() => {
+      document.getElementById("scanStatusOrder").textContent = "バーコードを枠内に合わせてください";
+    }, 1200);
   }
 }
 
@@ -532,15 +538,22 @@ document.getElementById("manualItemBtn").addEventListener("click", () => {
 });
 
 let itemScanLock = false;
+let itemPauseUntil = 0;
 function handleItemCode(code) {
   if (itemScanLock || !currentOrder) return;
+  if (Date.now() < itemPauseUntil) return; // 直前のスキャン読み取り中はカメラ検出を無視(連続誤カウント防止)
+
   const item = currentOrder.items.find(it => it.jan === code);
   const banner = document.getElementById("pickBanner");
+  const status = document.getElementById("scanStatusItem");
 
   if (!item) {
     ngSound();
     flash("Item", false);
     banner.innerHTML = `<div class="msg-banner ng">この商品はこの注文に含まれていません(JAN: ${code})</div>`;
+    itemPauseUntil = Date.now() + 1200;
+    status.textContent = "バーコードを一旦カメラから離してください";
+    setTimeout(() => { status.textContent = "バーコードを枠内に合わせてください"; }, 1200);
     return;
   }
   const got = pickedCount[item.jan] || 0;
@@ -548,16 +561,24 @@ function handleItemCode(code) {
     ngSound();
     flash("Item", false);
     banner.innerHTML = `<div class="msg-banner amber">「${item.name}」は既に必要数スキャン済みです(数量超過に注意)</div>`;
+    itemPauseUntil = Date.now() + 1200;
+    status.textContent = "バーコードを一旦カメラから離してください";
+    setTimeout(() => { status.textContent = "バーコードを枠内に合わせてください"; }, 1200);
     return;
   }
 
   itemScanLock = true;
+  itemPauseUntil = Date.now() + 1200;
   pickedCount[item.jan] = got + 1;
   okSound();
   flash("Item", true);
   banner.innerHTML = `<div class="msg-banner" style="background:#e4f6ea;color:#1c8a4c;">「${item.name}」OK (${pickedCount[item.jan]} / ${item.qty})</div>`;
   renderItemList();
-  setTimeout(() => { itemScanLock = false; }, 300);
+  status.textContent = "読み取り完了 - 次の商品まで少し離してください";
+  setTimeout(() => {
+    itemScanLock = false;
+    status.textContent = "バーコードを枠内に合わせてください";
+  }, 1200);
 
   const allDone = currentOrder.items.every(it => (pickedCount[it.jan] || 0) >= it.qty);
   if (allDone) {
