@@ -84,12 +84,12 @@
     position:relative;
     border-radius:18px;overflow:hidden;
     background:#0b1512;
-    aspect-ratio:1/1;
+    aspect-ratio:16/7;
     display:flex;align-items:center;justify-content:center;
   }
   .scan-box video{width:100%;height:100%;object-fit:cover;}
   .scan-frame{
-    position:absolute;inset:14%;
+    position:absolute;top:20%;bottom:20%;left:8%;right:8%;
     border:3px solid rgba(255,255,255,.85);
     border-radius:14px;
     box-shadow:0 0 0 999px rgba(0,0,0,.35);
@@ -255,14 +255,6 @@
         <div class="order-title" id="pickOrderTitle">注文 #0000</div>
         <div class="order-sub" id="pickOrderSub"></div>
 
-        <div class="package-banner" id="packageBanner">
-          <div>
-            <div class="label">推奨梱包資材(目安)</div>
-            <div class="value" id="packageValue">-</div>
-            <div class="note" id="packageNote"></div>
-          </div>
-        </div>
-
         <div class="scan-box">
           <video id="videoItem" playsinline muted></video>
           <div class="scan-frame"></div>
@@ -288,6 +280,15 @@
         <div class="circle">✓</div>
         <h2>梱包完了</h2>
         <p id="completeSub">この注文のピッキング・照合がすべて完了しました。</p>
+
+        <div class="package-banner" id="packageBanner" style="text-align:left;">
+          <div>
+            <div class="label">推奨梱包資材(目安)</div>
+            <div class="value" id="packageValue">-</div>
+            <div class="note" id="packageNote"></div>
+          </div>
+        </div>
+
         <button class="primary-btn" id="nextOrderBtn">出荷リストに戻る</button>
       </div>
     </section>
@@ -564,13 +565,6 @@ function renderPicking() {
   document.getElementById("pickOrderTitle").textContent = currentOrder.id;
   document.getElementById("pickOrderSub").textContent = `${currentOrder.channel} ・ ${currentOrder.customer}`;
   document.getElementById("pickBanner").innerHTML = "";
-
-  const pkg = estimatePackage(currentOrder);
-  const banner = document.getElementById("packageBanner");
-  banner.classList.toggle("warn", pkg.name === "要手動確認");
-  document.getElementById("packageValue").textContent = pkg.name;
-  document.getElementById("packageNote").textContent = pkg.note;
-
   renderItemList();
 }
 
@@ -654,7 +648,14 @@ function handleItemCode(code) {
     orderStatus[currentOrder.id] = "done";
     setTimeout(() => {
       document.getElementById("completeSub").textContent =
-        `${currentOrder.id} のピッキング・照合が完了しました。梱包して郵便局への持ち込み分にまとめてください。`;
+        `${currentOrder.id} のピッキング・照合が完了しました。推奨資材で梱包し、郵便局への持ち込み分にまとめてください。`;
+
+      const pkg = estimatePackage(currentOrder);
+      const banner = document.getElementById("packageBanner");
+      banner.classList.toggle("warn", pkg.name === "要手動確認");
+      document.getElementById("packageValue").textContent = pkg.name;
+      document.getElementById("packageNote").textContent = pkg.note;
+
       showScreen("complete", "梱包完了", false);
     }, 500);
   }
