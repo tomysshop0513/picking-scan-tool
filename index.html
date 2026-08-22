@@ -88,12 +88,7 @@
     display:flex;align-items:center;justify-content:center;
   }
   .scan-box video{width:100%;height:100%;object-fit:cover;}
-  .scan-frame{
-    position:absolute;top:20%;bottom:20%;left:8%;right:8%;
-    border:3px solid rgba(255,255,255,.85);
-    border-radius:14px;
-    box-shadow:0 0 0 999px rgba(0,0,0,.35);
-  }
+  .scan-frame{display:none;}
   .scan-status{
     position:absolute;bottom:14px;left:14px;right:14px;
     text-align:center;color:#fff;font-size:14px;
@@ -186,6 +181,8 @@
     display:flex;
     align-items:center;
     gap:6px;
+    white-space:nowrap;
+    width:max-content;
   }
   .scroll-hint.show{opacity:1;}
   .scroll-hint .arrow{
