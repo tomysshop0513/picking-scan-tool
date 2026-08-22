@@ -396,7 +396,11 @@ function showScreen(name, title, showBack) {
   stopAllCameras();
   window.scrollTo(0, 0);
   updateScrollHint();
-  if (name === "scanOrder") startCamera("videoOrder", "scanStatusOrder", onOrderScan);
+  if (name === "scanOrder") {
+    orderScanLock = false;
+    orderPauseUntil = 0;
+    startCamera("videoOrder", "scanStatusOrder", onOrderScan);
+  }
   if (name === "picking") startCamera("videoItem", "scanStatusItem", onItemScan);
 }
 
@@ -559,6 +563,8 @@ function handleOrderCode(code) {
 
 /* ---------- STEP2: ピッキング照合 ---------- */
 function renderPicking() {
+  itemScanLock = false;
+  itemPauseUntil = 0;
   document.getElementById("pickOrderTitle").textContent = currentOrder.id;
   document.getElementById("pickOrderSub").textContent = `${currentOrder.channel} ・ ${currentOrder.customer}`;
   document.getElementById("pickBanner").innerHTML = "";
@@ -630,14 +636,14 @@ function handleItemCode(code) {
   itemScanLock = true;
   itemPauseUntil = Date.now() + 2500;
   pickedCount[item.jan] = got + 1;
-  okSound();
-  flash("Item", true);
-  banner.innerHTML = `<div class="msg-banner" style="background:#e4f6ea;color:#1c8a4c;">「${item.name}」OK (${pickedCount[item.jan]} / ${item.qty})</div>`;
-  renderItemList();
 
   const allDone = currentOrder.items.every(it => (pickedCount[it.jan] || 0) >= it.qty);
 
   if (!allDone) {
+    okSound();
+    flash("Item", true);
+    banner.innerHTML = `<div class="msg-banner" style="background:#e4f6ea;color:#1c8a4c;">「${item.name}」OK (${pickedCount[item.jan]} / ${item.qty})</div>`;
+    renderItemList();
     status.textContent = "読み取り完了 - 次の商品まで少し離してください";
     setTimeout(() => {
       itemScanLock = false;
@@ -647,18 +653,16 @@ function handleItemCode(code) {
 
   if (allDone) {
     orderStatus[currentOrder.id] = "done";
-    setTimeout(() => {
-      document.getElementById("completeSub").textContent =
-        `${currentOrder.id} のピッキング・照合が完了しました。推奨資材で梱包し、郵便局への持ち込み分にまとめてください。`;
+    document.getElementById("completeSub").textContent =
+      `${currentOrder.id} のピッキング・照合が完了しました。推奨資材で梱包し、郵便局への持ち込み分にまとめてください。`;
 
-      const pkg = estimatePackage(currentOrder);
-      const banner = document.getElementById("packageBanner");
-      banner.classList.toggle("warn", pkg.name === "要手動確認");
-      document.getElementById("packageValue").textContent = pkg.name;
-      document.getElementById("packageNote").textContent = pkg.note;
+    const pkg = estimatePackage(currentOrder);
+    const pkgBanner = document.getElementById("packageBanner");
+    pkgBanner.classList.toggle("warn", pkg.name === "要手動確認");
+    document.getElementById("packageValue").textContent = pkg.name;
+    document.getElementById("packageNote").textContent = pkg.note;
 
-      showScreen("complete", "梱包完了", false);
-    }, 500);
+    showScreen("complete", "梱包完了", false);
   }
 }
 
