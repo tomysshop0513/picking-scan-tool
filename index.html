@@ -142,6 +142,16 @@
   .msg-banner.ng{background:var(--ng-bg);color:var(--ng);}
   .msg-banner.amber{background:#fdf1de;color:var(--amber);}
 
+  .package-banner{
+    display:flex;align-items:center;justify-content:space-between;
+    background:#eef2f0;border:1px solid #d7e2dd;border-radius:14px;
+    padding:12px 16px;margin-bottom:16px;
+  }
+  .package-banner .label{font-size:12px;color:#5a6b66;font-weight:700;}
+  .package-banner .value{font-size:18px;font-weight:800;color:var(--brand-dark);margin-top:2px;}
+  .package-banner .note{font-size:12px;color:#5a6b66;margin-top:2px;}
+  .package-banner.warn .value{color:var(--amber);}
+
   .complete-panel{
     text-align:center;padding:40px 10px;
   }
@@ -199,6 +209,14 @@
       <div class="order-title" id="pickOrderTitle">注文 #0000</div>
       <div class="order-sub" id="pickOrderSub"></div>
 
+      <div class="package-banner" id="packageBanner">
+        <div>
+          <div class="label">推奨梱包資材(目安)</div>
+          <div class="value" id="packageValue">-</div>
+          <div class="note" id="packageNote"></div>
+        </div>
+      </div>
+
       <div id="pickBanner"></div>
 
       <div id="itemList"></div>
@@ -240,8 +258,8 @@ const ORDERS = [
     customer: "楽天 山田様 / 東京都",
     channel: "楽天市場",
     items: [
-      { name: "ハンドクリーム 30g", jan: "4937768094902", qty: 2 },
-      { name: "アロマキャンドル ラベンダー", jan: "4901234500028", qty: 1 },
+      { name: "ハンドクリーム 30g", jan: "4937768094902", qty: 2, w: 4, d: 4, h: 8 },
+      { name: "アロマキャンドル ラベンダー", jan: "4901234500028", qty: 1, w: 6, d: 6, h: 7 },
     ],
   },
   {
@@ -250,7 +268,7 @@ const ORDERS = [
     customer: "Yahoo 佐藤様 / 大阪府",
     channel: "Yahooショッピング",
     items: [
-      { name: "オーガニックせっけん 3個セット", jan: "4901234500035", qty: 1 },
+      { name: "ポストカード 1枚", jan: "4901234500035", qty: 1, w: 15, d: 10, h: 0.2 },
     ],
   },
   {
@@ -259,12 +277,52 @@ const ORDERS = [
     customer: "楽天 鈴木様 / 福岡県",
     channel: "楽天市場",
     items: [
-      { name: "ハンドクリーム 30g", jan: "4937768094902", qty: 1 },
-      { name: "バスソルト 200g", jan: "4901234500042", qty: 2 },
-      { name: "アロマキャンドル ラベンダー", jan: "4901234500028", qty: 1 },
+      { name: "ハンドクリーム 30g", jan: "4937768094902", qty: 1, w: 4, d: 4, h: 8 },
+      { name: "バスソルト 200g", jan: "4901234500042", qty: 2, w: 9, d: 9, h: 11 },
+      { name: "アロマキャンドル ラベンダー", jan: "4901234500028", qty: 1, w: 6, d: 6, h: 7 },
     ],
   },
 ];
+
+/* ---------- 梱包資材の自動判定(目安) ---------- */
+const PACKAGE_BOXES = [
+  { name: "60サイズ", w: 26.5, d: 19.5, h: 12.0 },
+  { name: "80サイズ", w: 35.0, d: 25.0, h: 18.0 },
+  { name: "100サイズ", w: 43.0, d: 31.0, h: 24.0 },
+];
+const MAIL_FOOTPRINT = { w: 31, d: 22, maxThickness: 3.3 };
+const FILL_RATE = 0.65; // 隙間を考慮した係数(目安)
+
+function estimatePackage(order) {
+  let totalVolume = 0;
+  let totalThickness = 0;
+  let fitsMailFootprint = true;
+
+  order.items.forEach(it => {
+    totalVolume += it.w * it.d * it.h * it.qty;
+    totalThickness += it.h * it.qty;
+    const sides = [it.w, it.d].sort((a, b) => b - a);
+    const frame = [MAIL_FOOTPRINT.w, MAIL_FOOTPRINT.d].sort((a, b) => b - a);
+    if (!(sides[0] <= frame[0] && sides[1] <= frame[1])) fitsMailFootprint = false;
+  });
+
+  if (fitsMailFootprint && totalThickness <= MAIL_FOOTPRINT.maxThickness) {
+    return { name: "メール便(ゆうパケット)", note: `厚み合計 目安 ${totalThickness.toFixed(1)}cm` };
+  }
+
+  for (const box of PACKAGE_BOXES) {
+    const boxVolume = box.w * box.d * box.h;
+    const eachItemFits = order.items.every(it => {
+      const itemDims = [it.w, it.d, it.h].sort((a, b) => b - a);
+      const boxDims = [box.w, box.d, box.h].sort((a, b) => b - a);
+      return itemDims[0] <= boxDims[0] && itemDims[1] <= boxDims[1] && itemDims[2] <= boxDims[2];
+    });
+    if (eachItemFits && totalVolume <= boxVolume * FILL_RATE) {
+      return { name: box.name, note: `体積目安 ${Math.round(totalVolume).toLocaleString()}cm³` };
+    }
+  }
+  return { name: "要手動確認", note: "自動判定の範囲外です。担当者の判断で選んでください" };
+}
 
 let orderStatus = {}; // id -> "pending" | "done"
 ORDERS.forEach(o => orderStatus[o.id] = "pending");
@@ -303,12 +361,13 @@ function renderHome() {
   list.innerHTML = "";
   ORDERS.forEach(o => {
     const done = orderStatus[o.id] === "done";
+    const pkg = estimatePackage(o);
     const div = document.createElement("div");
     div.className = "order-card";
     div.innerHTML = `
       <div>
         <div class="id">${o.id}</div>
-        <div class="meta">${o.channel} ・ ${o.customer} ・ ${o.items.length}品目</div>
+        <div class="meta">${o.channel} ・ ${o.customer} ・ ${o.items.length}品目 ・ 資材目安: ${pkg.name}</div>
       </div>
       <div class="pill ${done ? "done" : ""}">${done ? "完了" : "未処理"}</div>
     `;
@@ -431,6 +490,13 @@ function renderPicking() {
   document.getElementById("pickOrderTitle").textContent = currentOrder.id;
   document.getElementById("pickOrderSub").textContent = `${currentOrder.channel} ・ ${currentOrder.customer}`;
   document.getElementById("pickBanner").innerHTML = "";
+
+  const pkg = estimatePackage(currentOrder);
+  const banner = document.getElementById("packageBanner");
+  banner.classList.toggle("warn", pkg.name === "要手動確認");
+  document.getElementById("packageValue").textContent = pkg.name;
+  document.getElementById("packageNote").textContent = pkg.note;
+
   renderItemList();
 }
 
