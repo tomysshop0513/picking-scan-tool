@@ -90,9 +90,8 @@
   .scan-box video{width:100%;height:100%;object-fit:cover;}
   .scan-frame{display:none;}
   .scan-status{
-    position:absolute;bottom:14px;left:14px;right:14px;
-    text-align:center;color:#fff;font-size:14px;
-    background:rgba(0,0,0,.35);border-radius:10px;padding:8px;
+    text-align:center;color:var(--ink);font-size:13px;
+    margin-top:8px;
   }
   .flash-ok, .flash-ng{
     position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
@@ -235,10 +234,10 @@
       <div class="scan-box" id="scanBoxOrder">
         <video id="videoOrder" playsinline muted></video>
         <div class="scan-frame"></div>
-        <div class="scan-status" id="scanStatusOrder">カメラを起動しています…</div>
         <div class="flash-ok" id="flashOkOrder">OK</div>
         <div class="flash-ng" id="flashNgOrder">NG</div>
       </div>
+      <div class="scan-status" id="scanStatusOrder">カメラを起動しています…</div>
       <div class="manual-entry">
         <input type="text" id="manualOrder" placeholder="読み取れない場合はコードを入力">
         <button id="manualOrderBtn">照合</button>
@@ -248,17 +247,16 @@
     <!-- PICKING -->
     <section class="screen" id="screen-picking">
       <div class="picking-sticky-top">
-        <div class="step-label" id="pickStepLabel">STEP 2 / 商品をピッキング</div>
         <div class="order-title" id="pickOrderTitle">注文 #0000</div>
         <div class="order-sub" id="pickOrderSub"></div>
 
         <div class="scan-box">
           <video id="videoItem" playsinline muted></video>
           <div class="scan-frame"></div>
-          <div class="scan-status" id="scanStatusItem">カメラを起動しています…</div>
           <div class="flash-ok" id="flashOkItem">OK</div>
           <div class="flash-ng" id="flashNgItem">NG</div>
         </div>
+        <div class="scan-status" id="scanStatusItem">カメラを起動しています…</div>
         <div class="manual-entry">
           <input type="text" id="manualItem" placeholder="読み取れない場合はJANコードを入力">
           <button id="manualItemBtn">照合</button>
