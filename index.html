@@ -152,6 +152,51 @@
   .package-banner .note{font-size:12px;color:#5a6b66;margin-top:2px;}
   .package-banner.warn .value{color:var(--amber);}
 
+  .picking-sticky-top{
+    position:sticky;
+    top:0;
+    background:#fff;
+    z-index:20;
+    margin:0 -20px;
+    padding:0 20px 14px;
+    box-shadow:0 10px 12px -10px rgba(0,0,0,0.12);
+  }
+  .picking-list-label{
+    font-size:13px;font-weight:700;color:#5a6b66;
+    margin:16px 0 8px;letter-spacing:.03em;
+  }
+  #screen-picking #itemList{padding-bottom:70px;}
+
+  .scroll-hint{
+    position:fixed;
+    left:50%;
+    bottom:18px;
+    transform:translateX(-50%);
+    background:var(--ink);
+    color:#fff;
+    font-size:13px;
+    font-weight:700;
+    padding:9px 16px;
+    border-radius:999px;
+    box-shadow:0 6px 16px rgba(0,0,0,.25);
+    opacity:0;
+    pointer-events:none;
+    transition:opacity .2s;
+    z-index:30;
+    display:flex;
+    align-items:center;
+    gap:6px;
+  }
+  .scroll-hint.show{opacity:1;}
+  .scroll-hint .arrow{
+    display:inline-block;
+    animation:bounce 1.2s infinite;
+  }
+  @keyframes bounce{
+    0%,100%{transform:translateY(0);}
+    50%{transform:translateY(4px);}
+  }
+
   .complete-panel{
     text-align:center;padding:40px 10px;
   }
@@ -205,33 +250,36 @@
 
     <!-- PICKING -->
     <section class="screen" id="screen-picking">
-      <div class="step-label" id="pickStepLabel">STEP 2 / 商品をピッキング</div>
-      <div class="order-title" id="pickOrderTitle">注文 #0000</div>
-      <div class="order-sub" id="pickOrderSub"></div>
+      <div class="picking-sticky-top">
+        <div class="step-label" id="pickStepLabel">STEP 2 / 商品をピッキング</div>
+        <div class="order-title" id="pickOrderTitle">注文 #0000</div>
+        <div class="order-sub" id="pickOrderSub"></div>
 
-      <div class="package-banner" id="packageBanner">
-        <div>
-          <div class="label">推奨梱包資材(目安)</div>
-          <div class="value" id="packageValue">-</div>
-          <div class="note" id="packageNote"></div>
+        <div class="package-banner" id="packageBanner">
+          <div>
+            <div class="label">推奨梱包資材(目安)</div>
+            <div class="value" id="packageValue">-</div>
+            <div class="note" id="packageNote"></div>
+          </div>
         </div>
+
+        <div class="scan-box">
+          <video id="videoItem" playsinline muted></video>
+          <div class="scan-frame"></div>
+          <div class="scan-status" id="scanStatusItem">カメラを起動しています…</div>
+          <div class="flash-ok" id="flashOkItem">OK</div>
+          <div class="flash-ng" id="flashNgItem">NG</div>
+        </div>
+        <div class="manual-entry">
+          <input type="text" id="manualItem" placeholder="読み取れない場合はJANコードを入力">
+          <button id="manualItemBtn">照合</button>
+        </div>
+
+        <div id="pickBanner"></div>
       </div>
 
-      <div id="pickBanner"></div>
-
+      <div class="picking-list-label">ピッキングリスト</div>
       <div id="itemList"></div>
-
-      <div class="scan-box" style="margin-top:16px;">
-        <video id="videoItem" playsinline muted></video>
-        <div class="scan-frame"></div>
-        <div class="scan-status" id="scanStatusItem">カメラを起動しています…</div>
-        <div class="flash-ok" id="flashOkItem">OK</div>
-        <div class="flash-ng" id="flashNgItem">NG</div>
-      </div>
-      <div class="manual-entry">
-        <input type="text" id="manualItem" placeholder="読み取れない場合はJANコードを入力">
-        <button id="manualItemBtn">照合</button>
-      </div>
     </section>
 
     <!-- COMPLETE -->
@@ -248,6 +296,8 @@
 
   <p class="footer-note">プロトタイプ版・サンプルデータで動作します。実運用ではRMS/CSVから注文データを取り込みます。</p>
 </div>
+
+<div class="scroll-hint" id="scrollHint"><span class="arrow">▼</span> スクロールして続きを見る</div>
 
 <script>
 /* ---------- サンプルデータ ---------- */
@@ -346,9 +396,27 @@ function showScreen(name, title, showBack) {
   headerTitle.textContent = title;
   backBtn.style.display = showBack ? "inline-block" : "none";
   stopAllCameras();
+  window.scrollTo(0, 0);
+  updateScrollHint();
   if (name === "scanOrder") startCamera("videoOrder", "scanStatusOrder", onOrderScan);
   if (name === "picking") startCamera("videoItem", "scanStatusItem", onItemScan);
 }
+
+/* ---------- スクロールヒント(ピッキング画面のみ) ---------- */
+const scrollHintEl = document.getElementById("scrollHint");
+function updateScrollHint() {
+  const isPicking = screens.picking.classList.contains("active");
+  if (!isPicking) {
+    scrollHintEl.classList.remove("show");
+    return;
+  }
+  const scrollBottom = window.scrollY + window.innerHeight;
+  const pageHeight = document.documentElement.scrollHeight;
+  const hasMoreBelow = pageHeight - scrollBottom > 40;
+  scrollHintEl.classList.toggle("show", hasMoreBelow);
+}
+window.addEventListener("scroll", updateScrollHint, { passive: true });
+window.addEventListener("resize", updateScrollHint);
 
 backBtn.addEventListener("click", () => {
   renderHome();
@@ -483,11 +551,11 @@ function handleOrderCode(code) {
   } else {
     ngSound();
     flash("Order", false);
-    orderPauseUntil = Date.now() + 1200;
+    orderPauseUntil = Date.now() + 2500;
     document.getElementById("scanStatusOrder").textContent = "この注文のラベルではありません。番号を確認してください。";
     setTimeout(() => {
       document.getElementById("scanStatusOrder").textContent = "バーコードを枠内に合わせてください";
-    }, 1200);
+    }, 2500);
   }
 }
 
@@ -526,6 +594,7 @@ function renderItemList() {
     `;
     wrap.appendChild(row);
   });
+  updateScrollHint();
 }
 
 function onItemScan(code) {
@@ -551,9 +620,9 @@ function handleItemCode(code) {
     ngSound();
     flash("Item", false);
     banner.innerHTML = `<div class="msg-banner ng">この商品はこの注文に含まれていません(JAN: ${code})</div>`;
-    itemPauseUntil = Date.now() + 1200;
+    itemPauseUntil = Date.now() + 2500;
     status.textContent = "バーコードを一旦カメラから離してください";
-    setTimeout(() => { status.textContent = "バーコードを枠内に合わせてください"; }, 1200);
+    setTimeout(() => { status.textContent = "バーコードを枠内に合わせてください"; }, 2500);
     return;
   }
   const got = pickedCount[item.jan] || 0;
@@ -561,14 +630,14 @@ function handleItemCode(code) {
     ngSound();
     flash("Item", false);
     banner.innerHTML = `<div class="msg-banner amber">「${item.name}」は既に必要数スキャン済みです(数量超過に注意)</div>`;
-    itemPauseUntil = Date.now() + 1200;
+    itemPauseUntil = Date.now() + 2500;
     status.textContent = "バーコードを一旦カメラから離してください";
-    setTimeout(() => { status.textContent = "バーコードを枠内に合わせてください"; }, 1200);
+    setTimeout(() => { status.textContent = "バーコードを枠内に合わせてください"; }, 2500);
     return;
   }
 
   itemScanLock = true;
-  itemPauseUntil = Date.now() + 1200;
+  itemPauseUntil = Date.now() + 2500;
   pickedCount[item.jan] = got + 1;
   okSound();
   flash("Item", true);
@@ -578,7 +647,7 @@ function handleItemCode(code) {
   setTimeout(() => {
     itemScanLock = false;
     status.textContent = "バーコードを枠内に合わせてください";
-  }, 1200);
+  }, 2500);
 
   const allDone = currentOrder.items.every(it => (pickedCount[it.jan] || 0) >= it.qty);
   if (allDone) {
