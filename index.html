@@ -408,9 +408,9 @@ function updateScrollHint() {
     scrollHintEl.classList.remove("show");
     return;
   }
-  const scrollBottom = window.scrollY + window.innerHeight;
-  const pageHeight = document.documentElement.scrollHeight;
-  const hasMoreBelow = pageHeight - scrollBottom > 40;
+  const itemListEl = document.getElementById("itemList");
+  const rect = itemListEl.getBoundingClientRect();
+  const hasMoreBelow = rect.bottom > window.innerHeight + 8;
   scrollHintEl.classList.toggle("show", hasMoreBelow);
 }
 window.addEventListener("scroll", updateScrollHint, { passive: true });
@@ -634,13 +634,17 @@ function handleItemCode(code) {
   flash("Item", true);
   banner.innerHTML = `<div class="msg-banner" style="background:#e4f6ea;color:#1c8a4c;">「${item.name}」OK (${pickedCount[item.jan]} / ${item.qty})</div>`;
   renderItemList();
-  status.textContent = "読み取り完了 - 次の商品まで少し離してください";
-  setTimeout(() => {
-    itemScanLock = false;
-    status.textContent = "バーコードを枠内に合わせてください";
-  }, 2500);
 
   const allDone = currentOrder.items.every(it => (pickedCount[it.jan] || 0) >= it.qty);
+
+  if (!allDone) {
+    status.textContent = "読み取り完了 - 次の商品まで少し離してください";
+    setTimeout(() => {
+      itemScanLock = false;
+      status.textContent = "バーコードを枠内に合わせてください";
+    }, 2500);
+  }
+
   if (allDone) {
     orderStatus[currentOrder.id] = "done";
     setTimeout(() => {
