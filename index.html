@@ -79,6 +79,24 @@
   }
   .hint{font-size:13px;color:#5a6b66;line-height:1.6;margin-top:6px;}
 
+  .worker-select{
+    background:#eef2f0;border:1px solid #d7e2dd;border-radius:14px;
+    padding:14px 16px;margin-bottom:16px;
+  }
+  .worker-label{font-size:13px;font-weight:700;color:#5a6b66;margin-bottom:10px;}
+  .worker-buttons{display:flex;flex-wrap:wrap;gap:8px;}
+  .worker-btn{
+    background:#fff;border:1.5px solid var(--line);border-radius:999px;
+    padding:9px 16px;font-size:14px;font-weight:700;color:var(--ink);
+  }
+  .worker-btn.selected{
+    background:var(--brand);border-color:var(--brand);color:#fff;
+  }
+  .worker-current{
+    font-size:13px;color:#5a6b66;
+  }
+  .worker-current b{color:var(--brand-dark);}
+
   /* Scan screen */
   .scan-box{
     position:relative;
@@ -223,6 +241,10 @@
 
     <!-- HOME -->
     <section class="screen active" id="screen-home">
+      <div class="worker-select" id="workerSelect">
+        <div class="worker-label">担当者を選択してください</div>
+        <div class="worker-buttons" id="workerButtons"></div>
+      </div>
       <div id="orderList"></div>
       <p class="hint">各注文をタップすると、発送ラベルのスキャンから開始します。</p>
     </section>
@@ -375,6 +397,35 @@ ORDERS.forEach(o => orderStatus[o.id] = "pending");
 let currentOrder = null;
 let pickedCount = {}; // jan -> count
 
+/* ---------- 担当者 ---------- */
+const WORKERS = ["佐藤", "鈴木", "田中", "山本"]; // 実際のスタッフ名に差し替えてください
+let currentWorker = null;
+
+/* ---------- Googleスプレッドシート記録 ---------- */
+const SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbzUdOLvKGwpf8UKGY3e319niJH_xvL-HtLC6Wv4Ow9G2Ir9vAnBBHVgFhiKg5ovnD7O/exec";
+
+function recordToSheet(order, pkg) {
+  if (!SHEET_WEBHOOK_URL) return; // URL未設定の間は何もしない
+  const itemsSummary = order.items
+    .map(it => `${it.name} x${it.qty}`)
+    .join(" / ");
+  fetch(SHEET_WEBHOOK_URL, {
+    method: "POST",
+    mode: "no-cors",
+    headers: { "Content-Type": "text/plain" },
+    body: JSON.stringify({
+      orderId: order.id,
+      channel: order.channel,
+      customer: order.customer,
+      itemsSummary,
+      package: pkg.name,
+      worker: currentWorker || "未選択",
+    }),
+  }).catch(() => {
+    // 送信失敗時はサイレントに無視(オフライン等)。必要であればUI側で通知する
+  });
+}
+
 /* ---------- 画面切り替え ---------- */
 const screens = {
   home: document.getElementById("screen-home"),
@@ -423,7 +474,31 @@ backBtn.addEventListener("click", () => {
 });
 
 /* ---------- ホーム画面 ---------- */
+function renderWorkerSelect() {
+  const wrap = document.getElementById("workerButtons");
+  const label = document.querySelector("#workerSelect .worker-label");
+  wrap.innerHTML = "";
+
+  if (currentWorker) {
+    label.innerHTML = `担当者: <b style="color:var(--brand-dark)">${currentWorker}</b> <span style="font-weight:400;">(タップで変更)</span>`;
+  } else {
+    label.textContent = "担当者を選択してください";
+  }
+
+  WORKERS.forEach(name => {
+    const btn = document.createElement("button");
+    btn.className = "worker-btn" + (currentWorker === name ? " selected" : "");
+    btn.textContent = name;
+    btn.addEventListener("click", () => {
+      currentWorker = name;
+      renderWorkerSelect();
+    });
+    wrap.appendChild(btn);
+  });
+}
+
 function renderHome() {
+  renderWorkerSelect();
   const list = document.getElementById("orderList");
   list.innerHTML = "";
   ORDERS.forEach(o => {
@@ -440,6 +515,10 @@ function renderHome() {
     `;
     if (!done) {
       div.addEventListener("click", () => {
+        if (!currentWorker) {
+          alert("先に担当者を選択してください");
+          return;
+        }
         currentOrder = o;
         pickedCount = {};
         o.items.forEach(it => pickedCount[it.jan] = 0);
@@ -657,6 +736,8 @@ function handleItemCode(code) {
     const pkgBanner = document.getElementById("packageBanner");
     pkgBanner.classList.toggle("warn", pkg.name === "要手動確認");
     document.getElementById("packageValue").textContent = pkg.name;
+
+    recordToSheet(currentOrder, pkg);
 
     showScreen("complete", "梱包完了", false);
   }
