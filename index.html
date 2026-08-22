@@ -280,7 +280,6 @@
           <div>
             <div class="label">推奨梱包資材(目安)</div>
             <div class="value" id="packageValue">-</div>
-            <div class="note" id="packageNote"></div>
           </div>
         </div>
 
@@ -634,13 +633,13 @@ function handleItemCode(code) {
   itemScanLock = true;
   itemPauseUntil = Date.now() + 2500;
   pickedCount[item.jan] = got + 1;
+  banner.innerHTML = "";
 
   const allDone = currentOrder.items.every(it => (pickedCount[it.jan] || 0) >= it.qty);
 
   if (!allDone) {
     okSound();
     flash("Item", true);
-    banner.innerHTML = `<div class="msg-banner" style="background:#e4f6ea;color:#1c8a4c;">「${item.name}」OK (${pickedCount[item.jan]} / ${item.qty})</div>`;
     renderItemList();
     status.textContent = "読み取り完了 - 次の商品まで少し離してください";
     setTimeout(() => {
@@ -658,7 +657,6 @@ function handleItemCode(code) {
     const pkgBanner = document.getElementById("packageBanner");
     pkgBanner.classList.toggle("warn", pkg.name === "要手動確認");
     document.getElementById("packageValue").textContent = pkg.name;
-    document.getElementById("packageNote").textContent = pkg.note;
 
     showScreen("complete", "梱包完了", false);
   }
