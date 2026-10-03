@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>出荷指示書の印刷</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js"></script>
+<style>
+  :root{ --ink:#132a2e; --line:#c8d3cf; --brand:#0f6e5c; --brand-dark:#0a4d40; --ng:#c23b2f; --ng-bg:#fbe7e4; --paper:#f3f6f4; }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--paper);color:var(--ink);
+       font-family:"Hiragino Sans","Yu Gothic",system-ui,-apple-system,sans-serif;}
+
+  /* ---- 画面(一覧) ---- */
+  .screen-only{max-width:960px;margin:0 auto;padding:20px 16px 40px;background:#fff;min-height:100vh;}
+  h1{font-size:20px;margin:0 0 4px;}
+  .sub{font-size:13px;color:#5a6b66;margin-bottom:14px;}
+  .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;}
+  .toolbar button{border:none;border-radius:10px;padding:10px 14px;font-size:14px;font-weight:700;cursor:pointer;}
+  .btn-main{background:var(--brand);color:#fff;}
+  .btn-sub{background:#eef2f0;color:var(--brand-dark);}
+  .toolbar .count{font-size:14px;color:#5a6b66;margin-left:auto;}
+  table.list{width:100%;border-collapse:collapse;font-size:14px;}
+  table.list th, table.list td{border-bottom:1px solid var(--line);padding:8px 6px;text-align:left;vertical-align:top;}
+  table.list th{font-size:12px;color:#5a6b66;}
+  tr.warn td{color:var(--ng);background:#fff7f6;}
+  td.items{font-size:13px;}
+  .key-panel{border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px;}
+  .key-title{font-size:16px;font-weight:800;}
+  .key-hint{font-size:13px;color:#5a6b66;margin-top:4px;}
+  .manual-entry{margin-top:10px;display:flex;gap:8px;}
+  .manual-entry input{flex:1;border:1px solid var(--line);border-radius:10px;padding:10px;font-size:15px;}
+  .manual-entry button{background:var(--ink);color:#fff;border:none;border-radius:10px;padding:0 16px;font-weight:700;}
+  .msg{font-size:14px;color:var(--ng);font-weight:700;margin:10px 0;}
+
+  /* ---- 印刷(出荷指示書) ---- */
+  #printArea{display:none;}
+  @page{size:A4 portrait;margin:0;}
+  @media print{
+    body{background:#fff;}
+    .screen-only{display:none !important;}
+    #printArea{display:block;}
+  }
+  .sheet{width:210mm;height:297mm;page-break-after:always;break-after:page;overflow:hidden;}
+  .sheet:last-child{page-break-after:auto;break-after:auto;}
+  .slip{height:148.5mm;padding:10mm 12mm 8mm;position:relative;overflow:hidden;}
+  .slip + .slip{border-top:0.4mm dashed #555;}
+  .slip + .slip::before{content:"✂ 切り取り線";position:absolute;top:-3.2mm;left:12mm;font-size:8pt;background:#fff;padding:0 2mm;color:#555;}
+  .slip .head{display:flex;justify-content:space-between;align-items:flex-start;gap:6mm;}
+  .slip .barcode svg{display:block;max-width:150mm;height:auto;}  /* 長い注文番号でも縦横比を保って縮める */
+  .slip .order-no{font-family:monospace;font-size:11pt;margin-top:1mm;letter-spacing:.03em;}
+  .slip .channel{font-size:12pt;font-weight:800;border:0.4mm solid #000;border-radius:2mm;padding:1mm 3mm;white-space:nowrap;}
+  .slip .dest{font-size:24pt;font-weight:900;margin:5mm 0 4mm;line-height:1.25;word-break:break-all;}
+  .slip table{width:100%;border-collapse:collapse;font-size:11pt;}
+  .slip th, .slip td{border:0.3mm solid #000;padding:1.5mm 2mm;}
+  .slip th{background:#eee;font-size:9pt;text-align:left;}
+  .slip td.qty{width:20mm;text-align:center;font-size:15pt;font-weight:900;}
+  .slip .pkg{margin-top:3mm;font-size:11pt;}
+  .slip .pkg b{font-size:13pt;}
+  .slip .foot{position:absolute;bottom:5mm;left:12mm;right:12mm;font-size:8pt;color:#555;display:flex;justify-content:space-between;}
+</style>
+</head>
+<body>
+<div class="screen-only">
+  <h1>出荷指示書の印刷</h1>
+  <div class="sub">本日出荷リストの「未処理」の注文を印刷します。1注文=A4の半分（上下2件、切り取り線つき）。
+    警告がある注文（赤字）は梱包できないため印刷できません。</div>
+  <div id="keyArea"></div>
+  <div class="toolbar">
+    <button class="btn-sub" id="reloadBtn">一覧を更新</button>
+    <button class="btn-sub" id="allBtn">印刷できる注文をすべて選択</button>
+    <button class="btn-sub" id="noneBtn">選択を解除</button>
+    <button class="btn-main" id="printBtn">選択した注文を印刷</button>
+    <span class="count" id="count"></span>
+  </div>
+  <div class="msg" id="msg"></div>
+  <table class="list">
+    <thead><tr><th></th><th>注文番号</th><th>チャネル</th><th>お届け先</th><th>商品（セットは単品に展開済み）</th><th>梱包資材(目安)</th><th>警告</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+</div>
+<div id="printArea"></div>
+
+<script src="config.js"></script>
+<script src="common.js"></script>
+<script>
+const { apiGet, estimatePackage, escapeHtml } = window.Common;
+let orders = [];
+
+async function load() {
+  const msg = document.getElementById("msg");
+  msg.textContent = "読み込み中…";
+  try {
+    orders = ((await apiGet("list")).orders || []).filter(o => o.status === "未処理");
+  } catch (e) {
+    msg.textContent = e.message;
+    return;
+  }
+  msg.textContent = orders.length ? "" : "未処理の注文はありません。";
+  const tbody = document.getElementById("rows");
+  tbody.innerHTML = "";
+  orders.forEach((o, i) => {
+    const pkg = estimatePackage(o.items);
+    const tr = document.createElement("tr");
+    if (o.warning) tr.className = "warn";
+    tr.innerHTML = `
+      <td><input type="checkbox" data-i="${i}" ${o.warning ? "disabled" : ""}></td>
+      <td>${escapeHtml(o.orderId)}</td>
+      <td>${escapeHtml(o.channel)}</td>
+      <td>${escapeHtml(o.customer)}</td>
+      <td class="items">${o.items.map(it => `${escapeHtml(it.name)} ×${it.qty}`).join("<br>")}</td>
+      <td>${escapeHtml(pkg.name)}</td>
+      <td>${escapeHtml(o.warning)}</td>`;
+    tbody.appendChild(tr);
+  });
+  updateCount();
+}
+
+function selected() {
+  return [...document.querySelectorAll("#rows input:checked")].map(c => orders[+c.dataset.i]);
+}
+function updateCount() {
+  const printable = orders.filter(o => !o.warning).length;
+  document.getElementById("count").textContent =
+    `選択 ${selected().length}件 / 印刷できる注文 ${printable}件（未処理 ${orders.length}件）`;
+}
+document.getElementById("rows").addEventListener("change", updateCount);
+document.getElementById("reloadBtn").addEventListener("click", load);
+document.getElementById("allBtn").addEventListener("click", () => {
+  document.querySelectorAll("#rows input:not(:disabled)").forEach(c => c.checked = true); updateCount();
+});
+document.getElementById("noneBtn").addEventListener("click", () => {
+  document.querySelectorAll("#rows input").forEach(c => c.checked = false); updateCount();
+});
+
+function slipHtml(o, printedAt) {
+  const pkg = estimatePackage(o.items);
+  return `
+    <div class="slip">
+      <div class="head">
+        <div class="barcode"><svg class="bc" data-code="${escapeHtml(o.orderId)}"></svg>
+          <div class="order-no">${escapeHtml(o.orderId)}</div></div>
+        <div class="channel">${escapeHtml(o.channel)}</div>
+      </div>
+      <div class="dest">${escapeHtml(o.customer)}</div>
+      <table>
+        <thead><tr><th>商品名</th><th style="text-align:center;">数量</th></tr></thead>
+        <tbody>${o.items.map(it => `<tr><td>${escapeHtml(it.name)}</td><td class="qty">${it.qty}</td></tr>`).join("")}</tbody>
+      </table>
+      <div class="pkg">梱包資材(目安): <b>${escapeHtml(pkg.name)}</b> <span style="font-size:9pt;">${escapeHtml(pkg.note || "")}</span></div>
+      <div class="foot"><span>出荷指示書（照合ツールのSTEP1でバーコードを読み取る）</span><span>印刷 ${escapeHtml(printedAt)}</span></div>
+    </div>`;
+}
+
+document.getElementById("printBtn").addEventListener("click", () => {
+  const list = selected();
+  if (!list.length) { alert("印刷する注文を選択してください"); return; }
+  const printedAt = new Date().toLocaleString("ja-JP");
+  let html = "";
+  for (let i = 0; i < list.length; i += 2) {
+    html += `<div class="sheet">${slipHtml(list[i], printedAt)}${list[i + 1] ? slipHtml(list[i + 1], printedAt) : ""}</div>`;
+  }
+  const area = document.getElementById("printArea");
+  area.innerHTML = html;
+  // CODE128。カメラで読みやすいよう、細すぎない線幅と左右の余白(クワイエットゾーン)を確保する
+  area.querySelectorAll("svg.bc").forEach(svg => {
+    JsBarcode(svg, svg.dataset.code, { format: "CODE128", width: 2, height: 70, margin: 14, displayValue: false });
+  });
+  window.print();
+});
+
+window.Common.ensureKey(document.getElementById("keyArea"), load);
+</script>
+</body>
+</html>

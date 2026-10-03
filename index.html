@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>出荷ピッキング照合ツール(プロトタイプ)</title>
+<title>出荷ピッキング照合ツール</title>
 <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.19.1/umd/index.min.js"></script>
 <style>
   :root{
@@ -225,6 +225,29 @@
   .footer-note{
     font-size:12px;color:#8a9a95;text-align:center;padding:14px 20px 24px;
   }
+  /* ---- 実データ版で追加 ---- */
+  .key-panel{border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px;background:#fff;}
+  .key-title{font-size:16px;font-weight:800;}
+  .key-hint{font-size:13px;color:#5a6b66;margin-top:4px;}
+  .summary{font-size:13px;color:#5a6b66;margin:14px 0 6px;display:flex;justify-content:space-between;align-items:center;}
+  .summary button{background:none;border:1px solid var(--line);border-radius:10px;padding:6px 10px;font-size:13px;color:var(--brand-dark);font-weight:700;}
+  .order-card.warn{border-color:#f0b8b1;background:#fff7f6;}
+  .order-card.warn .meta{color:var(--ng);}
+  .pill.gone{background:#f4f4f4;color:#999;}
+  .pill.warn{background:var(--ng-bg);color:var(--ng);}
+  .busy{font-size:15px;font-weight:700;color:var(--brand-dark);text-align:center;margin-top:10px;}
+
+  .stop-panel{text-align:center;padding:36px 8px;}
+  .stop-panel .big{font-size:30px;font-weight:900;line-height:1.4;margin:10px 0 14px;}
+  .stop-panel.ng .big{color:var(--ng);}
+  .stop-panel.amber .big{color:var(--amber);}
+  .stop-panel .detail{font-size:14px;color:#5a6b66;word-break:break-all;}
+
+  .dest-big{
+    border:3px solid var(--brand);border-radius:18px;padding:22px 14px;margin:6px 0 14px;text-align:center;
+    font-size:34px;font-weight:900;line-height:1.35;word-break:break-all;
+  }
+  .dest-guide{font-size:15px;font-weight:700;text-align:center;margin-bottom:12px;}
 </style>
 </head>
 <body>
@@ -238,6 +261,7 @@
   </header>
 
   <main>
+    <div id="keyArea"></div>
 
     <!-- HOME -->
     <section class="screen active" id="screen-home">
@@ -245,14 +269,16 @@
         <div class="worker-label">担当者を選択してください</div>
         <div class="worker-buttons" id="workerButtons"></div>
       </div>
+      <button class="primary-btn" id="startBtn">出荷指示書のバーコードを読む</button>
+      <p class="hint">出荷指示書に印字された注文番号のバーコードを読み取ると、ピッキングを開始します。</p>
+      <div class="summary"><span id="listSummary">読み込み中…</span><button id="reloadBtn">更新</button></div>
       <div id="orderList"></div>
-      <p class="hint">各注文をタップすると、発送ラベルのスキャンから開始します。</p>
     </section>
 
-    <!-- SCAN ORDER LABEL -->
+    <!-- STEP1: 出荷指示書の注文番号 -->
     <section class="screen" id="screen-scan-order">
-      <div class="step-label">STEP 1 / 発送ラベルをスキャン</div>
-      <div class="order-title">発送ラベルのバーコードを読み取ってください</div>
+      <div class="step-label">STEP 1 / 出荷指示書をスキャン</div>
+      <div class="order-title">出荷指示書の注文番号バーコードを読み取ってください</div>
       <div class="scan-box" id="scanBoxOrder">
         <video id="videoOrder" playsinline muted></video>
         <div class="scan-frame"></div>
@@ -260,16 +286,28 @@
         <div class="flash-ng" id="flashNgOrder">NG</div>
       </div>
       <div class="scan-status" id="scanStatusOrder">カメラを起動しています…</div>
+      <div class="busy" id="busyOrder"></div>
+      <div id="orderBanner"></div>
       <div class="manual-entry">
-        <input type="text" id="manualOrder" placeholder="読み取れない場合はコードを入力">
+        <input type="text" id="manualOrder" placeholder="読み取れない場合は注文番号を入力">
         <button id="manualOrderBtn">照合</button>
       </div>
     </section>
 
-    <!-- PICKING -->
+    <!-- 停止（梱包済み・対象外・警告あり） -->
+    <section class="screen" id="screen-stop">
+      <div class="stop-panel" id="stopPanel">
+        <div class="big" id="stopBig"></div>
+        <div class="detail" id="stopDetail"></div>
+      </div>
+      <button class="primary-btn" id="stopBackBtn">出荷リストに戻る</button>
+    </section>
+
+    <!-- STEP2: 商品照合 -->
     <section class="screen" id="screen-picking">
       <div class="picking-sticky-top">
-        <div class="order-title" id="pickOrderTitle">注文 #0000</div>
+        <div class="step-label">STEP 2 / 商品をスキャン</div>
+        <div class="order-title" id="pickOrderTitle"></div>
         <div class="order-sub" id="pickOrderSub"></div>
 
         <div class="scan-box">
@@ -291,146 +329,70 @@
       <div id="itemList"></div>
     </section>
 
+    <!-- STEP3: 宛名確認と発送ラベル -->
+    <section class="screen" id="screen-label">
+      <div class="step-label">STEP 3 / 発送ラベルをスキャン</div>
+      <div class="dest-big" id="destBig"></div>
+      <div class="dest-guide">ラベルの宛名と同じなら、ラベルのバーコードをスキャンしてください</div>
+      <div class="scan-box">
+        <video id="videoLabel" playsinline muted></video>
+        <div class="scan-frame"></div>
+        <div class="flash-ok" id="flashOkLabel">OK</div>
+        <div class="flash-ng" id="flashNgLabel">NG</div>
+      </div>
+      <div class="scan-status" id="scanStatusLabel">カメラを起動しています…</div>
+      <div class="busy" id="busyLabel"></div>
+      <div id="labelBanner"></div>
+      <div class="manual-entry">
+        <input type="text" id="manualLabel" inputmode="numeric" placeholder="読み取れない場合は追跡番号を入力">
+        <button id="manualLabelBtn">照合</button>
+      </div>
+    </section>
+
     <!-- COMPLETE -->
     <section class="screen" id="screen-complete">
       <div class="complete-panel">
         <div class="circle">✓</div>
         <h2>梱包完了</h2>
-        <p id="completeSub">この注文のピッキング・照合がすべて完了しました。</p>
+        <p id="completeSub"></p>
 
         <div class="package-banner" id="packageBanner" style="text-align:left;">
           <div>
             <div class="label">推奨梱包資材(目安)</div>
             <div class="value" id="packageValue">-</div>
+            <div class="note" id="packageNote"></div>
           </div>
         </div>
 
-        <button class="primary-btn" id="nextOrderBtn">出荷リストに戻る</button>
+        <button class="primary-btn" id="nextOrderBtn">次の注文へ</button>
       </div>
     </section>
 
   </main>
 
-  <p class="footer-note">プロトタイプ版・サンプルデータで動作します。実運用ではRMS/CSVから注文データを取り込みます。</p>
+  <p class="footer-note">本日出荷リスト（30分ごとに更新）をもとに動作します。注文の状態はスキャンした時点の最新を確認しています。</p>
 </div>
 
 <div class="scroll-hint" id="scrollHint"><span class="arrow">▼</span> スクロールして続きを見る</div>
 
+<script src="config.js"></script>
+<script src="common.js"></script>
 <script>
-/* ---------- サンプルデータ ---------- */
-const ORDERS = [
-  {
-    id: "ORD-20260821-001",
-    barcode: "ORD20260821001",
-    customer: "楽天 山田様 / 東京都",
-    channel: "楽天市場",
-    items: [
-      { name: "ハンドクリーム 30g", jan: "4937768094902", qty: 2, w: 4, d: 4, h: 8 },
-      { name: "アロマキャンドル ラベンダー", jan: "4901234500028", qty: 1, w: 6, d: 6, h: 7 },
-    ],
-  },
-  {
-    id: "ORD-20260821-002",
-    barcode: "ORD20260821002",
-    customer: "Yahoo 佐藤様 / 大阪府",
-    channel: "Yahooショッピング",
-    items: [
-      { name: "ポストカード 1枚", jan: "4901234500035", qty: 1, w: 15, d: 10, h: 0.2 },
-    ],
-  },
-  {
-    id: "ORD-20260821-003",
-    barcode: "ORD20260821003",
-    customer: "楽天 鈴木様 / 福岡県",
-    channel: "楽天市場",
-    items: [
-      { name: "ハンドクリーム 30g", jan: "4937768094902", qty: 1, w: 4, d: 4, h: 8 },
-      { name: "バスソルト 200g", jan: "4901234500042", qty: 2, w: 9, d: 9, h: 11 },
-      { name: "アロマキャンドル ラベンダー", jan: "4901234500028", qty: 1, w: 6, d: 6, h: 7 },
-    ],
-  },
-];
+const CFG = window.APP_CONFIG;
+const { apiGet, apiPost, jansOf, normalizeTracking, isTrackingFormat, estimatePackage, escapeHtml } = window.Common;
 
-/* ---------- 梱包資材の自動判定(目安) ---------- */
-const PACKAGE_BOXES = [
-  { name: "60サイズ", w: 26.5, d: 19.5, h: 12.0 },
-  { name: "80サイズ", w: 35.0, d: 25.0, h: 18.0 },
-  { name: "100サイズ", w: 43.0, d: 31.0, h: 24.0 },
-];
-const MAIL_FOOTPRINT = { w: 31, d: 22, maxThickness: 3.3 };
-const FILL_RATE = 0.65; // 隙間を考慮した係数(目安)
-
-function estimatePackage(order) {
-  let totalVolume = 0;
-  let totalThickness = 0;
-  let fitsMailFootprint = true;
-
-  order.items.forEach(it => {
-    totalVolume += it.w * it.d * it.h * it.qty;
-    totalThickness += it.h * it.qty;
-    const sides = [it.w, it.d].sort((a, b) => b - a);
-    const frame = [MAIL_FOOTPRINT.w, MAIL_FOOTPRINT.d].sort((a, b) => b - a);
-    if (!(sides[0] <= frame[0] && sides[1] <= frame[1])) fitsMailFootprint = false;
-  });
-
-  if (fitsMailFootprint && totalThickness <= MAIL_FOOTPRINT.maxThickness) {
-    return { name: "メール便(ゆうパケット)", note: `厚み合計 目安 ${totalThickness.toFixed(1)}cm` };
-  }
-
-  for (const box of PACKAGE_BOXES) {
-    const boxVolume = box.w * box.d * box.h;
-    const eachItemFits = order.items.every(it => {
-      const itemDims = [it.w, it.d, it.h].sort((a, b) => b - a);
-      const boxDims = [box.w, box.d, box.h].sort((a, b) => b - a);
-      return itemDims[0] <= boxDims[0] && itemDims[1] <= boxDims[1] && itemDims[2] <= boxDims[2];
-    });
-    if (eachItemFits && totalVolume <= boxVolume * FILL_RATE) {
-      return { name: box.name, note: `体積目安 ${Math.round(totalVolume).toLocaleString()}cm³` };
-    }
-  }
-  return { name: "要手動確認", note: "自動判定の範囲外です。担当者の判断で選んでください" };
-}
-
-let orderStatus = {}; // id -> "pending" | "done"
-ORDERS.forEach(o => orderStatus[o.id] = "pending");
-
-let currentOrder = null;
-let pickedCount = {}; // jan -> count
-
-/* ---------- 担当者 ---------- */
-const WORKERS = ["佐藤", "鈴木", "田中", "山本"]; // 実際のスタッフ名に差し替えてください
+let currentOrder = null;   // { orderId, channel, customer, items, status, warning }
+let pickedCount = [];      // 商品明細の行ごとのスキャン数（同じJANが複数行にあっても混ざらない）
 let currentWorker = null;
-
-/* ---------- Googleスプレッドシート記録 ---------- */
-const SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbzUdOLvKGwpf8UKGY3e319niJH_xvL-HtLC6Wv4Ow9G2Ir9vAnBBHVgFhiKg5ovnD7O/exec";
-
-function recordToSheet(order, pkg) {
-  if (!SHEET_WEBHOOK_URL) return; // URL未設定の間は何もしない
-  const itemsSummary = order.items
-    .map(it => `${it.name} x${it.qty}`)
-    .join(" / ");
-  fetch(SHEET_WEBHOOK_URL, {
-    method: "POST",
-    mode: "no-cors",
-    headers: { "Content-Type": "text/plain" },
-    body: JSON.stringify({
-      orderId: order.id,
-      channel: order.channel,
-      customer: order.customer,
-      itemsSummary,
-      package: pkg.name,
-      worker: currentWorker || "未選択",
-    }),
-  }).catch(() => {
-    // 送信失敗時はサイレントに無視(オフライン等)。必要であればUI側で通知する
-  });
-}
+let listCache = [];
 
 /* ---------- 画面切り替え ---------- */
 const screens = {
   home: document.getElementById("screen-home"),
   scanOrder: document.getElementById("screen-scan-order"),
+  stop: document.getElementById("screen-stop"),
   picking: document.getElementById("screen-picking"),
+  label: document.getElementById("screen-label"),
   complete: document.getElementById("screen-complete"),
 };
 const headerTitle = document.getElementById("headerTitle");
@@ -445,32 +407,44 @@ function showScreen(name, title, showBack) {
   window.scrollTo(0, 0);
   updateScrollHint();
   if (name === "scanOrder") {
-    orderScanLock = false;
-    orderPauseUntil = 0;
-    startCamera("videoOrder", "scanStatusOrder", onOrderScan);
+    orderScanLock = false; orderPauseUntil = 0;
+    document.getElementById("orderBanner").innerHTML = "";
+    document.getElementById("busyOrder").textContent = "";
+    startCamera("videoOrder", "scanStatusOrder", handleOrderCode);
   }
-  if (name === "picking") startCamera("videoItem", "scanStatusItem", onItemScan);
+  if (name === "picking") startCamera("videoItem", "scanStatusItem", handleItemCode);
+  if (name === "label") {
+    labelScanLock = false; labelPauseUntil = 0;
+    startCamera("videoLabel", "scanStatusLabel", handleLabelCode);
+  }
+}
+
+function goHome() {
+  currentOrder = null;
+  renderHome();
+  showScreen("home", "本日の出荷リスト", false);
 }
 
 /* ---------- スクロールヒント(ピッキング画面のみ) ---------- */
 const scrollHintEl = document.getElementById("scrollHint");
 function updateScrollHint() {
-  const isPicking = screens.picking.classList.contains("active");
-  if (!isPicking) {
-    scrollHintEl.classList.remove("show");
-    return;
-  }
-  const itemListEl = document.getElementById("itemList");
-  const rect = itemListEl.getBoundingClientRect();
-  const hasMoreBelow = rect.bottom > window.innerHeight + 8;
-  scrollHintEl.classList.toggle("show", hasMoreBelow);
+  if (!screens.picking.classList.contains("active")) { scrollHintEl.classList.remove("show"); return; }
+  const rect = document.getElementById("itemList").getBoundingClientRect();
+  scrollHintEl.classList.toggle("show", rect.bottom > window.innerHeight + 8);
 }
 window.addEventListener("scroll", updateScrollHint, { passive: true });
 window.addEventListener("resize", updateScrollHint);
 
 backBtn.addEventListener("click", () => {
-  renderHome();
-  showScreen("home", "本日の出荷リスト", false);
+  if (currentOrder && (screens.picking.classList.contains("active") || screens.label.classList.contains("active"))) {
+    if (!confirm("この注文の作業を中断して出荷リストに戻りますか？（スキャンした内容は記録されません）")) return;
+  }
+  goHome();
+});
+document.getElementById("stopBackBtn").addEventListener("click", goHome);
+document.getElementById("nextOrderBtn").addEventListener("click", () => {
+  currentOrder = null;
+  showScreen("scanOrder", "出荷指示書をスキャン", true);
 });
 
 /* ---------- ホーム画面 ---------- */
@@ -478,73 +452,69 @@ function renderWorkerSelect() {
   const wrap = document.getElementById("workerButtons");
   const label = document.querySelector("#workerSelect .worker-label");
   wrap.innerHTML = "";
-
-  if (currentWorker) {
-    label.innerHTML = `担当者: <b style="color:var(--brand-dark)">${currentWorker}</b> <span style="font-weight:400;">(タップで変更)</span>`;
-  } else {
-    label.textContent = "担当者を選択してください";
-  }
-
-  WORKERS.forEach(name => {
+  label.innerHTML = currentWorker
+    ? `担当者: <b style="color:var(--brand-dark)">${escapeHtml(currentWorker)}</b> <span style="font-weight:400;">(タップで変更)</span>`
+    : "担当者を選択してください";
+  CFG.WORKERS.forEach(name => {
     const btn = document.createElement("button");
     btn.className = "worker-btn" + (currentWorker === name ? " selected" : "");
     btn.textContent = name;
-    btn.addEventListener("click", () => {
-      currentWorker = name;
-      renderWorkerSelect();
-    });
+    btn.addEventListener("click", () => { currentWorker = name; renderWorkerSelect(); });
     wrap.appendChild(btn);
   });
 }
 
 function renderHome() {
   renderWorkerSelect();
+  loadList();
+}
+
+async function loadList() {
+  const summary = document.getElementById("listSummary");
   const list = document.getElementById("orderList");
+  summary.textContent = "読み込み中…";
+  try {
+    listCache = (await apiGet("list")).orders || [];
+  } catch (e) {
+    summary.textContent = e.message;
+    list.innerHTML = "";
+    return;
+  }
+  const pending = listCache.filter(o => o.status === "未処理");
+  const warn = pending.filter(o => o.warning).length;
+  summary.textContent = `未処理 ${pending.length}件` + (warn ? `（うち梱包できない注文 ${warn}件）` : "");
   list.innerHTML = "";
-  ORDERS.forEach(o => {
-    const done = orderStatus[o.id] === "done";
-    const pkg = estimatePackage(o);
+  listCache.forEach(o => {
     const div = document.createElement("div");
-    div.className = "order-card";
+    div.className = "order-card" + (o.status === "未処理" && o.warning ? " warn" : "");
+    const pill = o.status === "未処理" ? (o.warning ? ["warn", "梱包不可"] : ["", "未処理"])
+               : o.status === "完了" ? ["done", "完了"] : ["gone", o.status];
     div.innerHTML = `
       <div>
-        <div class="id">${o.id}</div>
-        <div class="meta">${o.channel} ・ ${o.customer} ・ ${o.items.length}品目 ・ 資材目安: ${pkg.name}</div>
+        <div class="id">${escapeHtml(o.orderId)}</div>
+        <div class="meta">${escapeHtml(o.channel)} ・ ${escapeHtml(o.customer)} ・ ${o.items.length}品目${o.warning ? "<br>" + escapeHtml(o.warning) : ""}</div>
       </div>
-      <div class="pill ${done ? "done" : ""}">${done ? "完了" : "未処理"}</div>
-    `;
-    if (!done) {
-      div.addEventListener("click", () => {
-        if (!currentWorker) {
-          alert("先に担当者を選択してください");
-          return;
-        }
-        currentOrder = o;
-        pickedCount = {};
-        o.items.forEach(it => pickedCount[it.jan] = 0);
-        showScreen("scanOrder", "発送ラベルをスキャン", true);
-      });
-    }
+      <div class="pill ${pill[0]}">${pill[1]}</div>`;
     list.appendChild(div);
   });
 }
-renderHome();
+document.getElementById("reloadBtn").addEventListener("click", loadList);
+document.getElementById("startBtn").addEventListener("click", () => {
+  if (!currentWorker) { alert("先に担当者を選択してください"); return; }
+  showScreen("scanOrder", "出荷指示書をスキャン", true);
+});
 
 /* ---------- カメラ / バーコード検出 (ZXing) ---------- */
 const zxingReady = typeof ZXing !== "undefined";
-let readers = {}; // videoId -> ZXing.BrowserMultiFormatReader
+let readers = {};
 
 function makeReader() {
   if (!zxingReady) return null;
   const hints = new Map();
-  hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
-    ZXing.BarcodeFormat.EAN_13,
-    ZXing.BarcodeFormat.EAN_8,
-    ZXing.BarcodeFormat.UPC_A,
-    ZXing.BarcodeFormat.UPC_E,
-    ZXing.BarcodeFormat.CODE_128,
-    ZXing.BarcodeFormat.CODE_39,
-  ]);
+  const F = ZXing.BarcodeFormat;
+  // 商品: EAN/UPC・Code39(アウトレット品)・Code128(FNSKU)／出荷指示書: Code128／発送ラベル: NW-7(Codabar)・ITF 等
+  hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,
+    [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.CODE_39, F.CODABAR, F.ITF].filter(f => f !== undefined));
   return new ZXing.BrowserMultiFormatReader(hints);
 }
 
@@ -558,15 +528,10 @@ async function startCamera(videoId, statusId, onDetect) {
   readers[videoId] = reader;
   try {
     status.textContent = "バーコードを枠内に合わせてください";
-    await reader.decodeFromConstraints(
-      { video: { facingMode: "environment" } },
-      videoId,
-      (result, err) => {
-        if (result) onDetect(result.getText());
-      }
-    );
+    await reader.decodeFromConstraints({ video: { facingMode: "environment" } }, videoId,
+      (result) => { if (result) onDetect(result.getText()); });
   } catch (e) {
-    status.textContent = "カメラを起動できません。下の入力欄からコードを入力してください。";
+    status.textContent = "カメラを起動できません。下の入力欄から入力してください。";
   }
 }
 
@@ -575,8 +540,8 @@ function stopAllCameras() {
   readers = {};
 }
 
-/* ---------- 音フィードバック ---------- */
-function beep(freq, dur, type="sine") {
+/* ---------- 音・表示フィードバック ---------- */
+function beep(freq, dur, type = "sine") {
   try {
     const ctx = beep._ctx || (beep._ctx = new (window.AudioContext || window.webkitAudioContext)());
     const osc = ctx.createOscillator();
@@ -587,61 +552,98 @@ function beep(freq, dur, type="sine") {
     osc.connect(gain); gain.connect(ctx.destination);
     osc.start();
     osc.stop(ctx.currentTime + dur);
-  } catch(e){}
+  } catch (e) {}
 }
-function okSound(){ beep(880, 0.12); }
-function ngSound(){ beep(180, 0.35, "square"); }
+function okSound() { beep(880, 0.12); }
+function ngSound() { beep(180, 0.35, "square"); }
 
 function flash(boxPrefix, ok) {
   const el = document.getElementById((ok ? "flashOk" : "flashNg") + boxPrefix);
   el.classList.remove("hide");
   el.classList.add("show");
-  setTimeout(() => {
-    el.classList.remove("show");
-    el.classList.add("hide");
-  }, 350);
+  setTimeout(() => { el.classList.remove("show"); el.classList.add("hide"); }, 350);
 }
 
-/* ---------- STEP1: 発送ラベル照合 ---------- */
-function onOrderScan(code) {
-  handleOrderCode(code);
+function ngPause(prefix, statusId, bannerId, html, ms = 2500) {
+  ngSound();
+  flash(prefix, false);
+  document.getElementById(bannerId).innerHTML = html;
+  const status = document.getElementById(statusId);
+  status.textContent = "バーコードを一旦カメラから離してください";
+  setTimeout(() => { status.textContent = "バーコードを枠内に合わせてください"; }, ms);
+  return Date.now() + ms;
 }
+
+function stopWith(kind, big, detail) {
+  ngSound();
+  const panel = document.getElementById("stopPanel");
+  panel.className = "stop-panel " + kind;
+  document.getElementById("stopBig").textContent = big;
+  document.getElementById("stopDetail").textContent = detail || "";
+  showScreen("stop", "作業できません", false);
+}
+
+/* ---------- STEP1: 出荷指示書の注文番号 → 最新の状態を確認 ---------- */
+let orderScanLock = false;
+let orderPauseUntil = 0;
 document.getElementById("manualOrderBtn").addEventListener("click", () => {
   const v = document.getElementById("manualOrder").value.trim();
   if (v) handleOrderCode(v);
+  document.getElementById("manualOrder").value = "";
 });
 
-let orderScanLock = false;
-let orderPauseUntil = 0;
-function handleOrderCode(code) {
-  if (orderScanLock) return;
-  if (Date.now() < orderPauseUntil) return;
-  if (!currentOrder) return;
-  if (code === currentOrder.barcode) {
-    orderScanLock = true;
-    okSound();
-    flash("Order", true);
-    setTimeout(() => {
-      orderScanLock = false;
-      renderPicking();
-      showScreen("picking", "商品をピッキング", true);
-    }, 400);
-  } else {
-    ngSound();
-    flash("Order", false);
-    orderPauseUntil = Date.now() + 2500;
-    document.getElementById("scanStatusOrder").textContent = "この注文のラベルではありません。番号を確認してください。";
-    setTimeout(() => {
-      document.getElementById("scanStatusOrder").textContent = "バーコードを枠内に合わせてください";
-    }, 2500);
+async function handleOrderCode(code) {
+  code = String(code).trim();
+  if (orderScanLock || Date.now() < orderPauseUntil) return;
+  orderScanLock = true;
+  const busy = document.getElementById("busyOrder");
+  busy.textContent = "注文の状態を確認しています…";
+  let res;
+  try {
+    // 30分ごとの同期の間にキャンセル・梱包済みになった注文を止めるため、読み取った時点の状態を取り直す
+    res = await apiGet("order", { id: code });
+  } catch (e) {
+    busy.textContent = "";
+    orderPauseUntil = ngPause("Order", "scanStatusOrder", "orderBanner", `<div class="msg-banner ng">${escapeHtml(e.message)}</div>`);
+    orderScanLock = false;
+    return;
   }
+  busy.textContent = "";
+  orderScanLock = false;
+  if (!res.found) {
+    orderPauseUntil = ngPause("Order", "scanStatusOrder", "orderBanner",
+      `<div class="msg-banner ng">本日の出荷リストに無い注文番号です（${escapeHtml(code)}）</div>`);
+    return;
+  }
+  const o = res.order;
+  if (res.recorded || o.status === "完了") {
+    stopWith("amber", "梱包済みです", `${o.orderId} はすでに梱包完了として記録されています。`);
+    return;
+  }
+  if (o.status === "対象外") {
+    stopWith("ng", "この注文は梱包しないでください", `${o.orderId} はキャンセル・発送済み等で出荷対象から外れました。`);
+    return;
+  }
+  if (o.warning) {
+    stopWith("ng", "この注文は梱包できません。担当者に連絡してください", `${o.orderId}：${o.warning}`);
+    return;
+  }
+  if (o.status !== "未処理" || !o.items.length) {
+    stopWith("ng", "この注文は梱包できません。担当者に連絡してください", `${o.orderId}：状態「${o.status}」・商品${o.items.length}件`);
+    return;
+  }
+  okSound();
+  flash("Order", true);
+  currentOrder = o;
+  pickedCount = o.items.map(() => 0);
+  setTimeout(() => { renderPicking(); showScreen("picking", "商品をピッキング", true); }, 400);
 }
 
-/* ---------- STEP2: ピッキング照合 ---------- */
+/* ---------- STEP2: 商品照合（jan はカンマ区切りで複数可） ---------- */
 function renderPicking() {
   itemScanLock = false;
   itemPauseUntil = 0;
-  document.getElementById("pickOrderTitle").textContent = currentOrder.id;
+  document.getElementById("pickOrderTitle").textContent = currentOrder.orderId;
   document.getElementById("pickOrderSub").textContent = `${currentOrder.channel} ・ ${currentOrder.customer}`;
   document.getElementById("pickBanner").innerHTML = "";
   renderItemList();
@@ -650,29 +652,25 @@ function renderPicking() {
 function renderItemList() {
   const wrap = document.getElementById("itemList");
   wrap.innerHTML = "";
-  currentOrder.items.forEach(it => {
-    const got = pickedCount[it.jan] || 0;
+  currentOrder.items.forEach((it, i) => {
+    const got = pickedCount[i];
     const complete = got >= it.qty;
     const row = document.createElement("div");
     row.className = "item-row" + (complete ? " done" : "");
     row.innerHTML = `
       <div>
-        <div class="item-name">${it.name}</div>
-        <div class="item-jan">JAN: ${it.jan}</div>
+        <div class="item-name">${escapeHtml(it.name)}</div>
+        <div class="item-jan">JAN: ${jansOf(it).map(escapeHtml).join(" / ")}</div>
       </div>
       <div style="display:flex;align-items:center;">
         <div class="item-qty ${complete ? "complete" : ""}">${got} / ${it.qty}</div>
         <div class="check ${complete ? "on" : ""}">${complete ? "✓" : ""}</div>
-      </div>
-    `;
+      </div>`;
     wrap.appendChild(row);
   });
   updateScrollHint();
 }
 
-function onItemScan(code) {
-  handleItemCode(code);
-}
 document.getElementById("manualItemBtn").addEventListener("click", () => {
   const v = document.getElementById("manualItem").value.trim();
   if (v) handleItemCode(v);
@@ -682,72 +680,142 @@ document.getElementById("manualItemBtn").addEventListener("click", () => {
 let itemScanLock = false;
 let itemPauseUntil = 0;
 function handleItemCode(code) {
+  code = String(code).trim();
   if (itemScanLock || !currentOrder) return;
   if (Date.now() < itemPauseUntil) return; // 直前のスキャン読み取り中はカメラ検出を無視(連続誤カウント防止)
 
-  const item = currentOrder.items.find(it => it.jan === code);
-  const banner = document.getElementById("pickBanner");
-  const status = document.getElementById("scanStatusItem");
-
-  if (!item) {
-    ngSound();
-    flash("Item", false);
-    banner.innerHTML = `<div class="msg-banner ng">この商品はこの注文に含まれていません(JAN: ${code})</div>`;
-    itemPauseUntil = Date.now() + 2500;
-    status.textContent = "バーコードを一旦カメラから離してください";
-    setTimeout(() => { status.textContent = "バーコードを枠内に合わせてください"; }, 2500);
+  const matches = currentOrder.items.map((it, i) => i).filter(i => jansOf(currentOrder.items[i]).includes(code));
+  if (!matches.length) {
+    itemPauseUntil = ngPause("Item", "scanStatusItem", "pickBanner",
+      `<div class="msg-banner ng">この商品はこの注文に含まれていません(JAN: ${escapeHtml(code)})</div>`);
     return;
   }
-  const got = pickedCount[item.jan] || 0;
-  if (got >= item.qty) {
-    ngSound();
-    flash("Item", false);
-    banner.innerHTML = `<div class="msg-banner amber">「${item.name}」は既に必要数スキャン済みです(数量超過に注意)</div>`;
-    itemPauseUntil = Date.now() + 2500;
-    status.textContent = "バーコードを一旦カメラから離してください";
-    setTimeout(() => { status.textContent = "バーコードを枠内に合わせてください"; }, 2500);
+  const idx = matches.find(i => pickedCount[i] < currentOrder.items[i].qty);
+  if (idx === undefined) {
+    const it = currentOrder.items[matches[0]];
+    itemPauseUntil = ngPause("Item", "scanStatusItem", "pickBanner",
+      `<div class="msg-banner amber">「${escapeHtml(it.name)}」は既に必要数スキャン済みです(数量超過に注意)</div>`);
     return;
   }
 
   itemScanLock = true;
   itemPauseUntil = Date.now() + 2500;
-  pickedCount[item.jan] = got + 1;
-  banner.innerHTML = "";
+  pickedCount[idx] += 1;
+  document.getElementById("pickBanner").innerHTML = "";
+  okSound();
+  flash("Item", true);
+  renderItemList();
 
-  const allDone = currentOrder.items.every(it => (pickedCount[it.jan] || 0) >= it.qty);
-
+  const allDone = currentOrder.items.every((it, i) => pickedCount[i] >= it.qty);
+  const status = document.getElementById("scanStatusItem");
   if (!allDone) {
-    okSound();
-    flash("Item", true);
-    renderItemList();
     status.textContent = "読み取り完了 - 次の商品まで少し離してください";
-    setTimeout(() => {
-      itemScanLock = false;
-      status.textContent = "バーコードを枠内に合わせてください";
-    }, 2500);
+    setTimeout(() => { itemScanLock = false; status.textContent = "バーコードを枠内に合わせてください"; }, 2500);
+    return;
   }
-
-  if (allDone) {
-    orderStatus[currentOrder.id] = "done";
-    document.getElementById("completeSub").textContent =
-      `${currentOrder.id} のピッキング・照合が完了しました。推奨資材で梱包し、郵便局への持ち込み分にまとめてください。`;
-
-    const pkg = estimatePackage(currentOrder);
-    const pkgBanner = document.getElementById("packageBanner");
-    pkgBanner.classList.toggle("warn", pkg.name === "要手動確認");
-    document.getElementById("packageValue").textContent = pkg.name;
-
-    recordToSheet(currentOrder, pkg);
-
-    showScreen("complete", "梱包完了", false);
-  }
+  setTimeout(() => {
+    document.getElementById("destBig").textContent = currentOrder.customer;
+    document.getElementById("labelBanner").innerHTML = "";
+    document.getElementById("busyLabel").textContent = "";
+    showScreen("label", "発送ラベルを確認", true);
+  }, 600);
 }
 
-document.getElementById("nextOrderBtn").addEventListener("click", () => {
-  currentOrder = null;
-  renderHome();
-  showScreen("home", "本日の出荷リスト", false);
+/* ---------- STEP3: 宛名確認 → 発送ラベルの追跡番号 → 作業記録 ---------- */
+let labelScanLock = false;
+let labelPauseUntil = 0;
+let pendingRecord = null;   // 書き込みに失敗したときの再送用
+document.getElementById("manualLabelBtn").addEventListener("click", () => {
+  const v = document.getElementById("manualLabel").value.trim();
+  if (v) handleLabelCode(v);
+  document.getElementById("manualLabel").value = "";
 });
+
+async function handleLabelCode(raw) {
+  if (labelScanLock || !currentOrder || Date.now() < labelPauseUntil) return;
+  const no = normalizeTracking(raw);
+  if (!isTrackingFormat(no)) {
+    labelPauseUntil = ngPause("Label", "scanStatusLabel", "labelBanner",
+      `<div class="msg-banner ng">発送ラベルの追跡番号ではありません（${escapeHtml(CFG.TRACKING.description)}／読み取り: ${escapeHtml(raw)}）</div>`);
+    return;
+  }
+  labelScanLock = true;
+  const busy = document.getElementById("busyLabel");
+  busy.textContent = "追跡番号を確認しています…";
+  try {
+    const t = await apiGet("tracking", { no });
+    if (t.used && t.orderId !== currentOrder.orderId) {
+      busy.textContent = "";
+      labelPauseUntil = ngPause("Label", "scanStatusLabel", "labelBanner",
+        `<div class="msg-banner ng">この追跡番号は別の注文（${escapeHtml(t.orderId)}）で記録済みです。ラベルを確認してください。</div>`, 3500);
+      labelScanLock = false;
+      return;
+    }
+  } catch (e) {
+    busy.textContent = "";
+    labelPauseUntil = ngPause("Label", "scanStatusLabel", "labelBanner", `<div class="msg-banner ng">${escapeHtml(e.message)}</div>`);
+    labelScanLock = false;
+    return;
+  }
+  const pkg = estimatePackage(currentOrder.items);
+  pendingRecord = {
+    orderId: currentOrder.orderId,
+    channel: currentOrder.channel,
+    customer: currentOrder.customer,
+    itemsSummary: currentOrder.items.map(it => `${it.name} x${it.qty}`).join(" / "),
+    package: pkg.name,
+    worker: currentWorker || "未選択",
+    trackingNo: no,
+  };
+  await sendRecord(pkg);
+}
+
+async function sendRecord(pkg) {
+  const busy = document.getElementById("busyLabel");
+  busy.textContent = "作業記録に書き込んでいます…";
+  let r;
+  try {
+    r = await apiPost(pendingRecord);
+  } catch (e) {
+    r = { result: "error", error: "network" };
+  }
+  busy.textContent = "";
+  if (r.result === "ok") {
+    okSound();
+    flash("Label", true);
+    showComplete(pkg);
+    return;
+  }
+  const msg = {
+    duplicate_tracking: `この追跡番号は別の注文（${escapeHtml(r.orderId || "")}）で記録済みです。ラベルを確認してください。`,
+    already_recorded: "この注文はすでに梱包完了として記録されています（別の端末で完了した可能性があります）。",
+    unauthorized: "接続キーが正しくありません。画面を読み込み直して、接続キーを入れ直してください。",
+  }[r.error];
+  if (msg) {
+    labelPauseUntil = ngPause("Label", "scanStatusLabel", "labelBanner", `<div class="msg-banner ng">${msg}</div>`, 3500);
+    labelScanLock = false;
+    return;
+  }
+  // 通信失敗・サーバー混雑: 同じ内容で再送できるようにする（完了扱いにはしない）
+  ngSound();
+  const banner = document.getElementById("labelBanner");
+  banner.innerHTML = `<div class="msg-banner ng">作業記録に書き込めませんでした（${escapeHtml(r.error || "")}）。
+    <button class="secondary-btn" id="retryRecord">もう一度書き込む</button></div>`;
+  document.getElementById("retryRecord").addEventListener("click", () => sendRecord(pkg));
+}
+
+function showComplete(pkg) {
+  document.getElementById("completeSub").textContent =
+    `${currentOrder.orderId}（追跡番号 ${pendingRecord.trackingNo}）を記録しました。推奨資材で梱包し、郵便局への持ち込み分にまとめてください。`;
+  document.getElementById("packageBanner").classList.toggle("warn", pkg.name === "要手動確認");
+  document.getElementById("packageValue").textContent = pkg.name;
+  document.getElementById("packageNote").textContent = pkg.note || "";
+  pendingRecord = null;
+  showScreen("complete", "梱包完了", false);
+}
+
+/* ---------- 起動 ---------- */
+window.Common.ensureKey(document.getElementById("keyArea"), () => goHome());
 </script>
 </body>
 </html>
