@@ -3,23 +3,24 @@
  * ピッキング照合システム 連携用 Apps Script
  * ------------------------------------------------------------
  * ① doPost  : 梱包完了時の作業記録を「記録」シートへ書き込む（追跡番号つき）
+ *              action=printed … 出荷指示書を印刷した注文の「本日出荷リスト」H列(印刷日時)に日時を書き込む
  * ② doGet   : 「本日出荷リスト」を読み取り、JSONで返す
  *     action=list      … 本日出荷リスト全件（出荷指示書の印刷ページ・照合ツールの一覧）
  *     action=order     … 注文1件の最新状態（照合ツール STEP1。&id=注文番号）
  *     action=tracking  … 追跡番号が記録済みか（照合ツール STEP3。&no=追跡番号）
  *     action=test      … 動作確認用（「記録」シートにテスト行を追加）
  *
- * トークン: スクリプトプロパティ SECRET_TOKEN があればそれを、無ければ下の SECRET_TOKEN 変数を使う。
- *           どちらも空なら全リクエストを拒否する。
- *           照合ツール側は、各端末で最初に1回入力する「接続キー」に同じ値を設定する。
+ * トークン: スクリプトプロパティ SECRET_TOKEN の値（コードには書かない）。未設定なら全リクエストを拒否する。
+ *           照合ツール・印刷ページ側は、各端末の設定画面で入力する「接続キー」に同じ値を設定する。
  * ============================================================
  */
 
-// 既存の値をそのまま入れる（スクリプトプロパティ SECRET_TOKEN を設定した場合はそちらが優先）
-var SECRET_TOKEN = "";
-
 var ORDER_LIST_SHEET_NAME = "本日出荷リスト";
 var WORK_LOG_SHEET_NAME = "記録";
+// 「本日出荷リスト」の列（PC側の同期が A〜G・I を書き、H「印刷日時」は印刷ページの記録でこのスクリプトが書く）
+var LIST_COL_PRINTED = 8;   // H列
+var LIST_COL_ORDERED = 9;   // I列 注文日時
+var TZ = "Asia/Tokyo";
 // 「記録」シートの列。既存の7列の並びは変えず、末尾(H列)に「追跡番号」を追加する
 var WORK_LOG_HEADER = ["日時", "注文ID", "チャネル", "お届け先", "商品内訳", "推奨資材", "担当者", "追跡番号"];
 var COL_ORDER_ID = 2;   // B列
@@ -27,8 +28,7 @@ var COL_TRACKING = 8;   // H列
 
 
 function getToken_() {
-  var prop = PropertiesService.getScriptProperties().getProperty("SECRET_TOKEN");
-  return prop || SECRET_TOKEN;
+  return PropertiesService.getScriptProperties().getProperty("SECRET_TOKEN") || "";
 }
 
 function authorized_(token) {
@@ -74,7 +74,9 @@ function doGet(e) {
 
 
 /**
- * POST: 梱包完了時の作業記録を追加
+ * POST:
+ *   action=printed → 出荷指示書の印刷記録  本文: { token, action: "printed", orderIds: [...] }
+ *   それ以外      → 梱包完了時の作業記録を追加
  *   本文(JSON): { token, orderId, channel, customer, itemsSummary, package, worker, trackingNo }
  *   - 同じ注文IDがすでに記録済み → { result: "error", error: "already_recorded" }
  *   - 追跡番号が別の注文で記録済み → { result: "error", error: "duplicate_tracking", orderId }
@@ -89,6 +91,9 @@ function doPost(e) {
   }
   if (!authorized_(data.token)) {
     return jsonOutput({ result: "error", error: "unauthorized" });
+  }
+  if (data.action === "printed") {
+    return jsonOutput(markPrinted_(data.orderIds || []));
   }
   var orderId = String(data.orderId || "").trim();
   var trackingNo = String(data.trackingNo || "").trim();
@@ -164,8 +169,10 @@ function getTodayList_() {
       customer: row[2] || "",
       items: items,
       status: row[4] || "未処理",
-      fetchedAt: row[5] ? String(row[5]) : "",
-      warning: row[6] ? String(row[6]) : ""
+      fetchedAt: cellText_(row[5]),
+      warning: row[6] ? String(row[6]) : "",
+      printedAt: cellText_(row[LIST_COL_PRINTED - 1]),
+      orderedAt: cellText_(row[LIST_COL_ORDERED - 1])
     });
   }
 
@@ -187,6 +194,52 @@ function getOrderStatus_(orderId) {
   if (!order) return { found: false };
   var log = readWorkLog_(getOrCreateWorkLogSheet_());
   return { found: true, order: order, recorded: !!log.orders[orderId] };
+}
+
+
+/**
+ * 出荷指示書を印刷した注文の「本日出荷リスト」H列に印刷日時を書く（再印刷なら上書き）
+ * → { result: "ok", printedAt: "yyyy-MM-dd HH:mm", updated: 件数, notFound: [注文ID...] }
+ */
+function markPrinted_(orderIds) {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(20000)) return { result: "error", error: "busy" };
+  try {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(ORDER_LIST_SHEET_NAME);
+    if (!sheet) return { result: "error", error: "no_list_sheet" };
+    if (sheet.getMaxColumns() < LIST_COL_PRINTED) {
+      sheet.insertColumnsAfter(sheet.getMaxColumns(), LIST_COL_PRINTED - sheet.getMaxColumns());
+    }
+    if (sheet.getRange(1, LIST_COL_PRINTED).getValue() === "") {
+      sheet.getRange(1, LIST_COL_PRINTED).setValue("印刷日時");
+    }
+    var printedAt = Utilities.formatDate(new Date(), TZ, "yyyy-MM-dd HH:mm");
+    var last = sheet.getLastRow();
+    var ids = last >= 2 ? sheet.getRange(2, 1, last - 1, 1).getValues() : [];
+    var want = {}, found = {};
+    orderIds.forEach(function (id) { want[String(id).trim()] = true; });
+    var updated = 0;
+    for (var i = 0; i < ids.length; i++) {
+      var id = String(ids[i][0]).trim();
+      if (want[id]) {
+        // 文字列として書く（日付として解釈させず、PC側の同期と同じ「yyyy-MM-dd HH:mm」形式にする）
+        sheet.getRange(i + 2, LIST_COL_PRINTED).setNumberFormat("@").setValue(printedAt);
+        found[id] = true;
+        updated++;
+      }
+    }
+    var notFound = Object.keys(want).filter(function (id) { return !found[id]; });
+    return { result: "ok", printedAt: printedAt, updated: updated, notFound: notFound };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+/** セルの値を表示用の文字列に（日付として保存されている場合は yyyy-MM-dd HH:mm） */
+function cellText_(v) {
+  if (v instanceof Date) return Utilities.formatDate(v, TZ, "yyyy-MM-dd HH:mm");
+  return v === null || v === undefined ? "" : String(v);
 }
 
 

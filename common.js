@@ -4,8 +4,8 @@
   const KEY_STORAGE = "pickingToolKey";
 
   /* ---------- 接続キー（Apps Script のトークン） ----------
-     公開ページのソースに書かないため、各端末で1回だけ入力してブラウザに保存する。
-     URL に ?key=XXXX を付けて開いても設定できる（設定後はURLから消す）。 */
+     公開ページのソースに書かないため、各端末の設定画面で手入力してブラウザに保存する。
+     URL には載せない（外部サービス経由で開いたときに、第三者のアクセスログに残るため）。 */
   function readKey() {
     try { return localStorage.getItem(KEY_STORAGE) || ""; } catch (e) { return memKey; }
   }
@@ -18,23 +18,13 @@
     memKey = "";
     try { localStorage.removeItem(KEY_STORAGE); } catch (e) {}
   }
-  (function takeKeyFromUrl() {
-    const u = new URL(location.href);
-    const k = u.searchParams.get("key");
-    if (k) {
-      saveKey(k.trim());
-      u.searchParams.delete("key");
-      history.replaceState(null, "", u.pathname + u.search + u.hash);
-    }
-  })();
-
   /** 接続キーが無ければ入力欄を表示し、保存されたら onReady() を呼ぶ */
-  function ensureKey(container, onReady) {
-    if (readKey()) { container.innerHTML = ""; onReady(); return; }
+  function ensureKey(container, onReady, force = false) {
+    if (readKey() && !force) { container.innerHTML = ""; onReady(); return; }
     container.innerHTML = `
       <div class="key-panel">
         <div class="key-title">接続キーを入力してください</div>
-        <div class="key-hint">この端末で最初の1回だけ必要です（担当者に確認してください）。</div>
+        <div class="key-hint">この端末で最初の1回だけ必要です（担当者に確認してください）。${force ? "<br>保存すると、今のキーと置き換わります。" : ""}</div>
         <div class="manual-entry">
           <input type="password" id="keyInput" autocomplete="off" placeholder="接続キー">
           <button id="keySave">保存</button>
@@ -137,6 +127,11 @@
     return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
 
-  window.Common = { ensureKey, apiGet, apiPost, ApiError, jansOf, normalizeTracking, isTrackingFormat,
+  /** 設定画面: 接続キーを入れ直す（今のキーは保存ボタンを押すまで残す） */
+  function changeKey(container, onReady) {
+    ensureKey(container, onReady, true);
+  }
+
+  window.Common = { ensureKey, changeKey, apiGet, apiPost, ApiError, jansOf, normalizeTracking, isTrackingFormat,
                     estimatePackage, escapeHtml, clearKey };
 })();

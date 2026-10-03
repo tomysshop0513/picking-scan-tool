@@ -248,6 +248,14 @@
     font-size:34px;font-weight:900;line-height:1.35;word-break:break-all;
   }
   .dest-guide{font-size:15px;font-weight:700;text-align:center;margin-bottom:12px;}
+  .home-tools{display:flex;gap:8px;margin-top:28px;}
+  .home-tools button{flex:1;background:#eef2f0;color:var(--brand-dark);border:none;border-radius:12px;padding:12px;font-size:14px;font-weight:700;}
+  .read-log{margin-top:14px;}
+  .read-item{border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:8px;font-size:13px;}
+  .read-item .raw{font-family:monospace;font-size:17px;font-weight:800;word-break:break-all;}
+  .read-item .meta{color:#5a6b66;margin-top:3px;}
+  .read-item .ok{color:var(--ok);font-weight:700;}
+  .read-item .ng{color:var(--ng);font-weight:700;}
 </style>
 </head>
 <body>
@@ -273,6 +281,25 @@
       <p class="hint">出荷指示書に印字された注文番号のバーコードを読み取ると、ピッキングを開始します。</p>
       <div class="summary"><span id="listSummary">読み込み中…</span><button id="reloadBtn">更新</button></div>
       <div id="orderList"></div>
+      <div class="home-tools">
+        <button id="readTestBtn">読み取りテスト</button>
+        <button id="changeKeyBtn">接続キーを変更</button>
+      </div>
+    </section>
+
+    <!-- 読み取りテスト（記録はしない） -->
+    <section class="screen" id="screen-readtest">
+      <div class="step-label">読み取りテスト（記録はしません）</div>
+      <div class="order-title">バーコードを読み取ると、読んだ値と形式を表示します</div>
+      <div class="scan-box">
+        <video id="videoTest" playsinline muted></video>
+        <div class="scan-frame"></div>
+        <div class="flash-ok" id="flashOkTest">OK</div>
+        <div class="flash-ng" id="flashNgTest">NG</div>
+      </div>
+      <div class="scan-status" id="scanStatusTest">カメラを起動しています…</div>
+      <p class="hint">クリックポストのラベルを読み、「追跡番号として」の判定を確認してください。同じ値の連続読み取りは1回だけ表示します。</p>
+      <div class="read-log" id="readLog"></div>
     </section>
 
     <!-- STEP1: 出荷指示書の注文番号 -->
@@ -394,6 +421,7 @@ const screens = {
   picking: document.getElementById("screen-picking"),
   label: document.getElementById("screen-label"),
   complete: document.getElementById("screen-complete"),
+  readtest: document.getElementById("screen-readtest"),
 };
 const headerTitle = document.getElementById("headerTitle");
 const backBtn = document.getElementById("backBtn");
@@ -413,6 +441,7 @@ function showScreen(name, title, showBack) {
     startCamera("videoOrder", "scanStatusOrder", handleOrderCode);
   }
   if (name === "picking") startCamera("videoItem", "scanStatusItem", handleItemCode);
+  if (name === "readtest") startCamera("videoTest", "scanStatusTest", handleReadTest);
   if (name === "label") {
     labelScanLock = false; labelPauseUntil = 0;
     startCamera("videoLabel", "scanStatusLabel", handleLabelCode);
@@ -499,6 +528,15 @@ async function loadList() {
   });
 }
 document.getElementById("reloadBtn").addEventListener("click", loadList);
+document.getElementById("readTestBtn").addEventListener("click", () => {
+  document.getElementById("readLog").innerHTML = "";
+  lastRead = "";
+  showScreen("readtest", "読み取りテスト", true);
+});
+document.getElementById("changeKeyBtn").addEventListener("click", () => {
+  document.getElementById("screen-home").classList.remove("active");
+  window.Common.changeKey(document.getElementById("keyArea"), () => goHome());
+});
 document.getElementById("startBtn").addEventListener("click", () => {
   if (!currentWorker) { alert("先に担当者を選択してください"); return; }
   showScreen("scanOrder", "出荷指示書をスキャン", true);
@@ -529,7 +567,7 @@ async function startCamera(videoId, statusId, onDetect) {
   try {
     status.textContent = "バーコードを枠内に合わせてください";
     await reader.decodeFromConstraints({ video: { facingMode: "environment" } }, videoId,
-      (result) => { if (result) onDetect(result.getText()); });
+      (result) => { if (result) onDetect(result.getText(), result); });
   } catch (e) {
     status.textContent = "カメラを起動できません。下の入力欄から入力してください。";
   }
@@ -812,6 +850,28 @@ function showComplete(pkg) {
   document.getElementById("packageNote").textContent = pkg.note || "";
   pendingRecord = null;
   showScreen("complete", "梱包完了", false);
+}
+
+/* ---------- 読み取りテスト: 生の値・バーコード形式・追跡番号としての判定を表示（記録しない） ---------- */
+let lastRead = "";
+function handleReadTest(raw, result) {
+  if (raw === lastRead) return;   // 同じバーコードを読み続けている間は1回だけ
+  lastRead = raw;
+  const fmt = result && ZXing.BarcodeFormat[result.getBarcodeFormat()];
+  const no = normalizeTracking(raw);
+  const asTracking = isTrackingFormat(no)
+    ? `<span class="ok">追跡番号として OK（${escapeHtml(no)}）</span>`
+    : `<span class="ng">追跡番号の形式（${escapeHtml(CFG.TRACKING.description)}）ではない</span>（整形後: ${escapeHtml(no) || "なし"}）`;
+  okSound();
+  flash("Test", true);
+  const div = document.createElement("div");
+  div.className = "read-item";
+  div.innerHTML = `<div class="raw">${escapeHtml(raw)}</div>
+    <div class="meta">形式: <b>${escapeHtml(fmt || "不明")}</b> ・ ${raw.length}文字 ・ ${new Date().toLocaleTimeString("ja-JP")}</div>
+    <div class="meta">${asTracking}</div>`;
+  const log = document.getElementById("readLog");
+  log.insertBefore(div, log.firstChild);
+  while (log.children.length > 20) log.removeChild(log.lastChild);
 }
 
 /* ---------- 起動 ---------- */

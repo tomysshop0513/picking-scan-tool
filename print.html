@@ -49,7 +49,11 @@
   .slip .head{display:flex;justify-content:space-between;align-items:flex-start;gap:6mm;}
   .slip .barcode svg{display:block;max-width:150mm;height:auto;}  /* 長い注文番号でも縦横比を保って縮める */
   .slip .order-no{font-family:monospace;font-size:11pt;margin-top:1mm;letter-spacing:.03em;}
-  .slip .channel{font-size:12pt;font-weight:800;border:0.4mm solid #000;border-radius:2mm;padding:1mm 3mm;white-space:nowrap;}
+  .slip .channel{font-size:12pt;font-weight:800;border:0.4mm solid #000;border-radius:2mm;padding:1mm 3mm;white-space:nowrap;display:inline-block;}
+  .slip .right{text-align:right;}
+  .slip .stamp{font-size:8pt;color:#333;margin-bottom:1.5mm;white-space:nowrap;}
+  .toolbar label{font-size:14px;display:flex;align-items:center;gap:4px;}
+  tr.printed td{color:#8a9a95;}
   .slip .dest{font-size:24pt;font-weight:900;margin:5mm 0 4mm;line-height:1.25;word-break:break-all;}
   .slip table{width:100%;border-collapse:collapse;font-size:11pt;}
   .slip th, .slip td{border:0.3mm solid #000;padding:1.5mm 2mm;}
@@ -63,19 +67,21 @@
 <body>
 <div class="screen-only">
   <h1>出荷指示書の印刷</h1>
-  <div class="sub">本日出荷リストの「未処理」の注文を印刷します。1注文=A4の半分（上下2件、切り取り線つき）。
-    警告がある注文（赤字）は梱包できないため印刷できません。</div>
+  <div class="sub">本日出荷リストの「未処理」で、まだ印刷していない注文を表示しています（注文日時の古い順）。
+    1注文=A4の半分（上下2件、切り取り線つき）。警告がある注文（赤字）は梱包できないため印刷できません。</div>
   <div id="keyArea"></div>
   <div class="toolbar">
     <button class="btn-sub" id="reloadBtn">一覧を更新</button>
     <button class="btn-sub" id="allBtn">印刷できる注文をすべて選択</button>
     <button class="btn-sub" id="noneBtn">選択を解除</button>
+    <label><input type="checkbox" id="showPrinted"> 印刷済みも表示</label>
     <button class="btn-main" id="printBtn">選択した注文を印刷</button>
+    <button class="btn-sub" id="changeKeyBtn">接続キーを変更</button>
     <span class="count" id="count"></span>
   </div>
   <div class="msg" id="msg"></div>
   <table class="list">
-    <thead><tr><th></th><th>注文番号</th><th>チャネル</th><th>お届け先</th><th>商品（セットは単品に展開済み）</th><th>梱包資材(目安)</th><th>警告</th></tr></thead>
+    <thead><tr><th></th><th>注文日時</th><th>注文番号</th><th>チャネル</th><th>お届け先</th><th>商品（セットは単品に展開済み）</th><th>梱包資材(目安)</th><th>印刷日時</th><th>警告</th></tr></thead>
     <tbody id="rows"></tbody>
   </table>
 </div>
@@ -84,32 +90,46 @@
 <script src="config.js"></script>
 <script src="common.js"></script>
 <script>
-const { apiGet, estimatePackage, escapeHtml } = window.Common;
-let orders = [];
+const { apiGet, apiPost, estimatePackage, escapeHtml } = window.Common;
+let allPending = [];   // 未処理の注文（注文日時の古い順）
+let shown = [];        // 表示中の注文
 
 async function load() {
   const msg = document.getElementById("msg");
   msg.textContent = "読み込み中…";
   try {
-    orders = ((await apiGet("list")).orders || []).filter(o => o.status === "未処理");
+    allPending = ((await apiGet("list")).orders || []).filter(o => o.status === "未処理");
   } catch (e) {
     msg.textContent = e.message;
     return;
   }
-  msg.textContent = orders.length ? "" : "未処理の注文はありません。";
+  // 注文日時の古い順（注文日時が無いものは最後、同じなら注文番号順）
+  allPending.sort((a, b) => (a.orderedAt || "9999").localeCompare(b.orderedAt || "9999") || a.orderId.localeCompare(b.orderId));
+  render();
+}
+
+function render() {
+  const showPrinted = document.getElementById("showPrinted").checked;
+  shown = allPending.filter(o => showPrinted || !o.printedAt);
+  const msg = document.getElementById("msg");
+  msg.textContent = shown.length ? "" : (showPrinted ? "未処理の注文はありません。" : "まだ印刷していない未処理の注文はありません。");
   const tbody = document.getElementById("rows");
   tbody.innerHTML = "";
-  orders.forEach((o, i) => {
+  shown.forEach((o, i) => {
     const pkg = estimatePackage(o.items);
     const tr = document.createElement("tr");
-    if (o.warning) tr.className = "warn";
+    tr.className = o.warning ? "warn" : (o.printedAt ? "printed" : "");
+    // 未印刷で警告の無い注文は最初から選択済み（印刷済みは再印刷になるので選択しない）
+    const checked = !o.warning && !o.printedAt;
     tr.innerHTML = `
-      <td><input type="checkbox" data-i="${i}" ${o.warning ? "disabled" : ""}></td>
+      <td><input type="checkbox" data-i="${i}" ${o.warning ? "disabled" : ""} ${checked ? "checked" : ""}></td>
+      <td>${escapeHtml(o.orderedAt)}</td>
       <td>${escapeHtml(o.orderId)}</td>
       <td>${escapeHtml(o.channel)}</td>
       <td>${escapeHtml(o.customer)}</td>
       <td class="items">${o.items.map(it => `${escapeHtml(it.name)} ×${it.qty}`).join("<br>")}</td>
       <td>${escapeHtml(pkg.name)}</td>
+      <td>${escapeHtml(o.printedAt || "未印刷")}</td>
       <td>${escapeHtml(o.warning)}</td>`;
     tbody.appendChild(tr);
   });
@@ -117,14 +137,15 @@ async function load() {
 }
 
 function selected() {
-  return [...document.querySelectorAll("#rows input:checked")].map(c => orders[+c.dataset.i]);
+  return [...document.querySelectorAll("#rows input:checked")].map(c => shown[+c.dataset.i]);
 }
 function updateCount() {
-  const printable = orders.filter(o => !o.warning).length;
+  const unprinted = allPending.filter(o => !o.printedAt && !o.warning).length;
   document.getElementById("count").textContent =
-    `選択 ${selected().length}件 / 印刷できる注文 ${printable}件（未処理 ${orders.length}件）`;
+    `選択 ${selected().length}件 / 未印刷 ${unprinted}件（未処理 ${allPending.length}件）`;
 }
 document.getElementById("rows").addEventListener("change", updateCount);
+document.getElementById("showPrinted").addEventListener("change", render);
 document.getElementById("reloadBtn").addEventListener("click", load);
 document.getElementById("allBtn").addEventListener("click", () => {
   document.querySelectorAll("#rows input:not(:disabled)").forEach(c => c.checked = true); updateCount();
@@ -132,15 +153,21 @@ document.getElementById("allBtn").addEventListener("click", () => {
 document.getElementById("noneBtn").addEventListener("click", () => {
   document.querySelectorAll("#rows input").forEach(c => c.checked = false); updateCount();
 });
+document.getElementById("changeKeyBtn").addEventListener("click", () => {
+  window.Common.changeKey(document.getElementById("keyArea"), load);
+});
 
-function slipHtml(o, printedAt) {
+function slipHtml(o, printedAt, no, total) {
   const pkg = estimatePackage(o.items);
   return `
     <div class="slip">
       <div class="head">
         <div class="barcode"><svg class="bc" data-code="${escapeHtml(o.orderId)}"></svg>
           <div class="order-no">${escapeHtml(o.orderId)}</div></div>
-        <div class="channel">${escapeHtml(o.channel)}</div>
+        <div class="right">
+          <div class="stamp">印刷 ${escapeHtml(printedAt)}　${no}/${total}</div>
+          <div class="channel">${escapeHtml(o.channel)}</div>
+        </div>
       </div>
       <div class="dest">${escapeHtml(o.customer)}</div>
       <table>
@@ -148,17 +175,25 @@ function slipHtml(o, printedAt) {
         <tbody>${o.items.map(it => `<tr><td>${escapeHtml(it.name)}</td><td class="qty">${it.qty}</td></tr>`).join("")}</tbody>
       </table>
       <div class="pkg">梱包資材(目安): <b>${escapeHtml(pkg.name)}</b> <span style="font-size:9pt;">${escapeHtml(pkg.note || "")}</span></div>
-      <div class="foot"><span>出荷指示書（照合ツールのSTEP1でバーコードを読み取る）</span><span>印刷 ${escapeHtml(printedAt)}</span></div>
+      <div class="foot"><span>出荷指示書（照合ツールのSTEP1でバーコードを読み取る）</span><span>注文日時 ${escapeHtml(o.orderedAt || "-")}</span></div>
     </div>`;
 }
 
-document.getElementById("printBtn").addEventListener("click", () => {
+document.getElementById("printBtn").addEventListener("click", async () => {
   const list = selected();
+  const msg = document.getElementById("msg");
   if (!list.length) { alert("印刷する注文を選択してください"); return; }
-  const printedAt = new Date().toLocaleString("ja-JP");
+  const reprint = list.filter(o => o.printedAt);
+  if (reprint.length && !confirm(`再印刷です。\n選択した ${list.length}件のうち ${reprint.length}件は印刷済みです`
+      + `（${reprint.map(o => o.orderId).slice(0, 3).join("、")}${reprint.length > 3 ? " ほか" : ""}）。\n印刷しますか？`)) return;
+
+  const d = new Date();
+  const p2 = n => String(n).padStart(2, "0");
+  const printedAt = `${d.getMonth() + 1}/${d.getDate()} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
   let html = "";
   for (let i = 0; i < list.length; i += 2) {
-    html += `<div class="sheet">${slipHtml(list[i], printedAt)}${list[i + 1] ? slipHtml(list[i + 1], printedAt) : ""}</div>`;
+    html += `<div class="sheet">${slipHtml(list[i], printedAt, i + 1, list.length)}`
+          + `${list[i + 1] ? slipHtml(list[i + 1], printedAt, i + 2, list.length) : ""}</div>`;
   }
   const area = document.getElementById("printArea");
   area.innerHTML = html;
@@ -167,6 +202,24 @@ document.getElementById("printBtn").addEventListener("click", () => {
     JsBarcode(svg, svg.dataset.code, { format: "CODE128", width: 2, height: 70, margin: 14, displayValue: false });
   });
   window.print();
+
+  // 印刷ダイアログでキャンセルされた場合を記録しないよう、印刷できたかを確認してから印刷日時を記録する
+  if (!confirm(`${list.length}件の出荷指示書を印刷できましたか？\nOK を押すと印刷日時を記録します（キャンセルで記録しない）。`)) return;
+  msg.textContent = "印刷日時を記録しています…";
+  let r;
+  try {
+    r = await apiPost({ action: "printed", orderIds: list.map(o => o.orderId) });
+  } catch (e) {
+    r = { result: "error", error: "network" };
+  }
+  if (r.result !== "ok") {
+    msg.textContent = `印刷日時を記録できませんでした（${r.error}）。指示書は印刷済みなので、担当者に連絡してください。`;
+    return;
+  }
+  const done = `${r.updated}件の印刷日時を記録しました（${r.printedAt}）。`
+    + (r.notFound && r.notFound.length ? ` 本日出荷リストに見つからなかった注文: ${r.notFound.join("、")}` : "");
+  await load();
+  msg.textContent = done;
 });
 
 window.Common.ensureKey(document.getElementById("keyArea"), load);
