@@ -3,7 +3,7 @@
  * ピッキング照合システム 連携用 Apps Script
  * ------------------------------------------------------------
  * ① doPost  : 梱包完了時の作業記録を「記録」シートへ書き込む（追跡番号つき）
- *              action=printed … 出荷指示書を印刷した注文の「本日出荷リスト」H列(印刷日時)に日時を書き込む
+ *              action=printed … 出荷指示書を印刷した注文を「印刷記録」シートに追記する
  * ② doGet   : 「本日出荷リスト」を読み取り、JSONで返す
  *     action=list      … 本日出荷リスト全件（出荷指示書の印刷ページ・照合ツールの一覧）
  *     action=order     … 注文1件の最新状態（照合ツール STEP1。&id=注文番号）
@@ -17,9 +17,10 @@
 
 var ORDER_LIST_SHEET_NAME = "本日出荷リスト";
 var WORK_LOG_SHEET_NAME = "記録";
-// 「本日出荷リスト」の列（PC側の同期が A〜G・I を書き、H「印刷日時」は印刷ページの記録でこのスクリプトが書く）
-var LIST_COL_PRINTED = 8;   // H列
-var LIST_COL_ORDERED = 9;   // I列 注文日時
+// 「本日出荷リスト」はPC側の同期だけが書く（このスクリプトは読むだけ）。H列=注文日時
+var LIST_COL_ORDERED = 8;   // H列
+// 出荷指示書の印刷記録（このスクリプトだけが追記する。PC側の同期は触らない）
+var PRINT_LOG_SHEET_NAME = "印刷記録";
 var TZ = "Asia/Tokyo";
 // 「記録」シートの列。既存の7列の並びは変えず、末尾(H列)に「追跡番号」を追加する
 var WORK_LOG_HEADER = ["日時", "注文ID", "チャネル", "お届け先", "商品内訳", "推奨資材", "担当者", "追跡番号"];
@@ -75,7 +76,7 @@ function doGet(e) {
 
 /**
  * POST:
- *   action=printed → 出荷指示書の印刷記録  本文: { token, action: "printed", orderIds: [...] }
+ *   action=printed → 出荷指示書の印刷記録  本文: { token, action: "printed", orderIds: [...], device: "端末名(任意)" }
  *   それ以外      → 梱包完了時の作業記録を追加
  *   本文(JSON): { token, orderId, channel, customer, itemsSummary, package, worker, trackingNo }
  *   - 同じ注文IDがすでに記録済み → { result: "error", error: "already_recorded" }
@@ -93,7 +94,7 @@ function doPost(e) {
     return jsonOutput({ result: "error", error: "unauthorized" });
   }
   if (data.action === "printed") {
-    return jsonOutput(markPrinted_(data.orderIds || []));
+    return jsonOutput(markPrinted_(data.orderIds || [], data.device));
   }
   var orderId = String(data.orderId || "").trim();
   var trackingNo = String(data.trackingNo || "").trim();
@@ -139,6 +140,8 @@ function doPost(e) {
  *   D: 商品明細(JSON文字列) 例: [{"sku":"sus-l1w","name":"…","jan":"4562403100153","qty":2,"w":3,"d":3,"h":26.5}]
  *      jan はカンマ区切りで複数のことがある（どれをスキャンしてもよい）。w/d/h(cm)は寸法が登録済みの商品のみ
  *   E: ステータス(未処理 / 完了 / 対象外) / F: 取得日時 / G: 警告(JAN未登録など。空でなければ梱包させない)
+ *   H: 注文日時
+ * 印刷日時は「印刷記録」シートから注文IDで引く
  */
 function getTodayList_() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -149,6 +152,7 @@ function getTodayList_() {
   }
 
   var data = sheet.getDataRange().getValues();
+  var printed = readPrintLog_();
   var orders = [];
 
   for (var i = 1; i < data.length; i++) {
@@ -171,7 +175,7 @@ function getTodayList_() {
       status: row[4] || "未処理",
       fetchedAt: cellText_(row[5]),
       warning: row[6] ? String(row[6]) : "",
-      printedAt: cellText_(row[LIST_COL_PRINTED - 1]),
+      printedAt: printed[String(orderId)] || "",   // 「印刷記録」の最新の印刷日時（無ければ未印刷）
       orderedAt: cellText_(row[LIST_COL_ORDERED - 1])
     });
   }
@@ -198,41 +202,58 @@ function getOrderStatus_(orderId) {
 
 
 /**
- * 出荷指示書を印刷した注文の「本日出荷リスト」H列に印刷日時を書く（再印刷なら上書き）
- * → { result: "ok", printedAt: "yyyy-MM-dd HH:mm", updated: 件数, notFound: [注文ID...] }
+ * 出荷指示書の印刷を「印刷記録」シートに追記する（A=注文ID / B=印刷日時 / C=端末）。
+ * 本日出荷リストは PC側の同期が行を並べ替えて書き直すため、行番号に依存する書き込みはしない
+ * （同期と重なると別の注文の行に書かれ、未印刷の注文が「印刷済み」に見えて出荷漏れにつながる）。
+ * 注文IDをキーに追記するだけなので、同期と重なっても他の注文に影響しない。再印刷は行を追加し、最新の日時を使う。
+ * → { result: "ok", printedAt: "yyyy-MM-dd HH:mm:ss", recorded: 件数 }
  */
-function markPrinted_(orderIds) {
+function markPrinted_(orderIds, device) {
+  var ids = [];
+  (orderIds || []).forEach(function (id) {
+    id = String(id).trim();
+    if (id && ids.indexOf(id) < 0) ids.push(id);
+  });
+  if (!ids.length) return { result: "error", error: "no_order_id" };
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(20000)) return { result: "error", error: "busy" };
   try {
-    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(ORDER_LIST_SHEET_NAME);
-    if (!sheet) return { result: "error", error: "no_list_sheet" };
-    if (sheet.getMaxColumns() < LIST_COL_PRINTED) {
-      sheet.insertColumnsAfter(sheet.getMaxColumns(), LIST_COL_PRINTED - sheet.getMaxColumns());
-    }
-    if (sheet.getRange(1, LIST_COL_PRINTED).getValue() === "") {
-      sheet.getRange(1, LIST_COL_PRINTED).setValue("印刷日時");
-    }
-    var printedAt = Utilities.formatDate(new Date(), TZ, "yyyy-MM-dd HH:mm");
-    var last = sheet.getLastRow();
-    var ids = last >= 2 ? sheet.getRange(2, 1, last - 1, 1).getValues() : [];
-    var want = {}, found = {};
-    orderIds.forEach(function (id) { want[String(id).trim()] = true; });
-    var updated = 0;
-    for (var i = 0; i < ids.length; i++) {
-      var id = String(ids[i][0]).trim();
-      if (want[id]) {
-        // 文字列として書く（日付として解釈させず、PC側の同期と同じ「yyyy-MM-dd HH:mm」形式にする）
-        sheet.getRange(i + 2, LIST_COL_PRINTED).setNumberFormat("@").setValue(printedAt);
-        found[id] = true;
-        updated++;
-      }
-    }
-    var notFound = Object.keys(want).filter(function (id) { return !found[id]; });
-    return { result: "ok", printedAt: printedAt, updated: updated, notFound: notFound };
+    var sheet = getOrCreatePrintLogSheet_();
+    var printedAt = Utilities.formatDate(new Date(), TZ, "yyyy-MM-dd HH:mm:ss");
+    var rows = ids.map(function (id) { return [id, printedAt, String(device || "").slice(0, 100)]; });
+    var start = sheet.getLastRow() + 1;
+    // 文字列として書く（日付として解釈させず、並べ替え・比較できる「yyyy-MM-dd HH:mm:ss」のまま保存）
+    sheet.getRange(start, 1, rows.length, 3).setNumberFormat("@").setValues(rows);
+    return { result: "ok", printedAt: printedAt, recorded: rows.length };
   } finally {
     lock.releaseLock();
   }
+}
+
+
+/** 「印刷記録」→ { 注文ID: 最新の印刷日時 } */
+function readPrintLog_() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PRINT_LOG_SHEET_NAME);
+  var latest = {};
+  if (!sheet || sheet.getLastRow() < 2) return latest;
+  var values = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues();
+  for (var i = 0; i < values.length; i++) {
+    var id = String(values[i][0] || "").trim();
+    var at = cellText_(values[i][1]);
+    if (id && (!latest[id] || at > latest[id])) latest[id] = at;
+  }
+  return latest;
+}
+
+
+function getOrCreatePrintLogSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(PRINT_LOG_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(PRINT_LOG_SHEET_NAME);
+    sheet.appendRow(["注文ID", "印刷日時", "端末"]);
+  }
+  return sheet;
 }
 
 

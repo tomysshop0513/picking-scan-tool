@@ -129,7 +129,7 @@ function render() {
       <td>${escapeHtml(o.customer)}</td>
       <td class="items">${o.items.map(it => `${escapeHtml(it.name)} ×${it.qty}`).join("<br>")}</td>
       <td>${escapeHtml(pkg.name)}</td>
-      <td>${escapeHtml(o.printedAt || "未印刷")}</td>
+      <td>${escapeHtml(o.printedAt ? o.printedAt.slice(0, 16) : "未印刷")}</td>
       <td>${escapeHtml(o.warning)}</td>`;
     tbody.appendChild(tr);
   });
@@ -156,6 +156,16 @@ document.getElementById("noneBtn").addEventListener("click", () => {
 document.getElementById("changeKeyBtn").addEventListener("click", () => {
   window.Common.changeKey(document.getElementById("keyArea"), load);
 });
+
+/** 印刷記録の「端末」列用（任意の目安。どのPC・ブラウザで印刷したか） */
+function deviceName() {
+  const ua = navigator.userAgent;
+  const os = /Windows/.test(ua) ? "Windows" : /Mac OS/.test(ua) ? "Mac" : /Android/.test(ua) ? "Android"
+           : /iPhone|iPad/.test(ua) ? "iOS" : "その他";
+  const br = /Edg\//.test(ua) ? "Edge" : /Chrome\//.test(ua) ? "Chrome" : /Firefox\//.test(ua) ? "Firefox"
+           : /Safari\//.test(ua) ? "Safari" : "ブラウザ";
+  return `print.html ${os} ${br}`;
+}
 
 function slipHtml(o, printedAt, no, total) {
   const pkg = estimatePackage(o.items);
@@ -208,7 +218,8 @@ document.getElementById("printBtn").addEventListener("click", async () => {
   msg.textContent = "印刷日時を記録しています…";
   let r;
   try {
-    r = await apiPost({ action: "printed", orderIds: list.map(o => o.orderId) });
+    // 「印刷記録」シートに注文IDで追記する（本日出荷リストには書かない）
+    r = await apiPost({ action: "printed", orderIds: list.map(o => o.orderId), device: deviceName() });
   } catch (e) {
     r = { result: "error", error: "network" };
   }
@@ -216,8 +227,7 @@ document.getElementById("printBtn").addEventListener("click", async () => {
     msg.textContent = `印刷日時を記録できませんでした（${r.error}）。指示書は印刷済みなので、担当者に連絡してください。`;
     return;
   }
-  const done = `${r.updated}件の印刷日時を記録しました（${r.printedAt}）。`
-    + (r.notFound && r.notFound.length ? ` 本日出荷リストに見つからなかった注文: ${r.notFound.join("、")}` : "");
+  const done = `${r.recorded}件の印刷を記録しました（${r.printedAt}）。`;
   await load();
   msg.textContent = done;
 });

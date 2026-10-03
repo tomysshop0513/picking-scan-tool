@@ -327,6 +327,7 @@
         <div class="big" id="stopBig"></div>
         <div class="detail" id="stopDetail"></div>
       </div>
+      <button class="primary-btn" id="proceedBtn" style="display:none;">このまま進む</button>
       <button class="primary-btn" id="stopBackBtn">出荷リストに戻る</button>
     </section>
 
@@ -612,8 +613,12 @@ function ngPause(prefix, statusId, bannerId, html, ms = 2500) {
   return Date.now() + ms;
 }
 
-function stopWith(kind, big, detail) {
+function stopWith(kind, big, detail, onProceed) {
   ngSound();
+  const proceed = document.getElementById("proceedBtn");
+  proceed.style.display = onProceed ? "block" : "none";
+  proceed.onclick = onProceed || null;
+  document.getElementById("stopBackBtn").className = onProceed ? "secondary-btn" : "primary-btn";
   const panel = document.getElementById("stopPanel");
   panel.className = "stop-panel " + kind;
   document.getElementById("stopBig").textContent = big;
@@ -670,11 +675,22 @@ async function handleOrderCode(code) {
     stopWith("ng", "この注文は梱包できません。担当者に連絡してください", `${o.orderId}：状態「${o.status}」・商品${o.items.length}件`);
     return;
   }
+  const start = () => {
+    currentOrder = o;
+    pickedCount = o.items.map(() => 0);
+    renderPicking();
+    showScreen("picking", "商品をピッキング", true);
+  };
+  if (!o.printedAt) {
+    // 出荷指示書の印刷記録漏れの検知用（作業は続けられる）
+    stopWith("amber", "この指示書は印刷記録がありません",
+      `${o.orderId} は「印刷記録」に記録がありません。印刷時に「印刷できましたか？」でOKを押し忘れた可能性があります。`
+      + "内容に問題がなければ、このまま進めます。", start);
+    return;
+  }
   okSound();
   flash("Order", true);
-  currentOrder = o;
-  pickedCount = o.items.map(() => 0);
-  setTimeout(() => { renderPicking(); showScreen("picking", "商品をピッキング", true); }, 400);
+  setTimeout(start, 400);
 }
 
 /* ---------- STEP2: 商品照合（jan はカンマ区切りで複数可） ---------- */
