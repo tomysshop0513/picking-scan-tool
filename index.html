@@ -372,7 +372,7 @@
       <div class="busy" id="busyLabel"></div>
       <div id="labelBanner"></div>
       <div class="manual-entry">
-        <input type="text" id="manualLabel" inputmode="numeric" placeholder="読み取れない場合は追跡番号を入力">
+        <input type="text" id="manualLabel" inputmode="numeric" autocomplete="off" enterkeyhint="done" placeholder="読み取れない場合は追跡番号(数字12桁)を入力">
         <button id="manualLabelBtn">照合</button>
       </div>
     </section>
@@ -779,14 +779,25 @@ function handleItemCode(code) {
 let labelScanLock = false;
 let labelPauseUntil = 0;
 let pendingRecord = null;   // 書き込みに失敗したときの再送用
-document.getElementById("manualLabelBtn").addEventListener("click", () => {
-  const v = document.getElementById("manualLabel").value.trim();
-  if (v) handleLabelCode(v);
-  document.getElementById("manualLabel").value = "";
+// 手入力: カメラのNG表示中(labelPauseUntil)でも受け付ける。形式NGのときは入力を残して直せるようにする
+function submitManualLabel() {
+  const input = document.getElementById("manualLabel");
+  const v = input.value.trim();
+  if (!v || !currentOrder) return;
+  if (labelScanLock) {
+    document.getElementById("labelBanner").innerHTML = `<div class="msg-banner amber">確認中です。少し待ってから、もう一度「照合」を押してください。</div>`;
+    return;
+  }
+  if (isTrackingFormat(normalizeTracking(v))) input.value = "";
+  handleLabelCode(v, true);
+}
+document.getElementById("manualLabelBtn").addEventListener("click", submitManualLabel);
+document.getElementById("manualLabel").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); submitManualLabel(); }
 });
 
-async function handleLabelCode(raw) {
-  if (labelScanLock || !currentOrder || Date.now() < labelPauseUntil) return;
+async function handleLabelCode(raw, manual = false) {
+  if (labelScanLock || !currentOrder || (!manual && Date.now() < labelPauseUntil)) return;
   const no = normalizeTracking(raw);
   if (!isTrackingFormat(no)) {
     labelPauseUntil = ngPause("Label", "scanStatusLabel", "labelBanner",
