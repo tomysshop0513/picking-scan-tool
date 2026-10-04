@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>出荷ピッキング照合ツール</title>
-<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.19.1/umd/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.23.0/umd/index.min.js"></script>
 <style>
   :root{
     --ink:#132a2e;
@@ -256,6 +256,10 @@
   .read-item .meta{color:#5a6b66;margin-top:3px;}
   .read-item .ok{color:var(--ok);font-weight:700;}
   .read-item .ng{color:var(--ng);font-weight:700;}
+  .cam-diag{margin-top:10px;border:1px dashed var(--line);border-radius:12px;padding:8px 12px;font-size:13px;color:#5a6b66;line-height:1.7;}
+  .cam-diag b{color:var(--ink);}
+  .cam-diag .live{display:inline-block;width:8px;height:8px;border-radius:50%;background:#bbb;margin-right:6px;vertical-align:middle;}
+  .cam-diag .live.on{background:var(--ok);}
 </style>
 </head>
 <body>
@@ -298,6 +302,7 @@
         <div class="flash-ng" id="flashNgTest">NG</div>
       </div>
       <div class="scan-status" id="scanStatusTest">カメラを起動しています…</div>
+      <div class="cam-diag" id="camDiag">カメラ情報: 起動中…</div>
       <p class="hint">クリックポストのラベルを読み、「追跡番号として」の判定を確認してください。同じ値の連続読み取りは1回だけ表示します。</p>
       <div class="read-log" id="readLog"></div>
     </section>
@@ -442,7 +447,7 @@ function showScreen(name, title, showBack) {
     startCamera("videoOrder", "scanStatusOrder", handleOrderCode);
   }
   if (name === "picking") startCamera("videoItem", "scanStatusItem", handleItemCode);
-  if (name === "readtest") startCamera("videoTest", "scanStatusTest", handleReadTest);
+  if (name === "readtest") startReadTest();
   if (name === "label") {
     labelScanLock = false; labelPauseUntil = 0;
     startCamera("videoLabel", "scanStatusLabel", handleLabelCode);
@@ -545,6 +550,7 @@ document.getElementById("startBtn").addEventListener("click", () => {
 
 /* ---------- カメラ / バーコード検出 (ZXing) ---------- */
 const zxingReady = typeof ZXing !== "undefined";
+const ZXING_VERSION = "0.23.0";   // <script src> の版と合わせる
 let readers = {};
 
 function makeReader() {
@@ -552,26 +558,67 @@ function makeReader() {
   const hints = new Map();
   const F = ZXing.BarcodeFormat;
   // 商品: EAN/UPC・Code39(アウトレット品)・Code128(FNSKU)／出荷指示書: Code128／発送ラベル: NW-7(Codabar)・ITF 等
+  // ※ CODABAR は ZXing 0.20.0 以降でないと読めない（0.19.1 は未実装で、指定しても無視される）
   hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,
     [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.CODE_39, F.CODABAR, F.ITF].filter(f => f !== undefined));
+  if (CFG.CAMERA.tryHarder) hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
   return new ZXing.BrowserMultiFormatReader(hints);
 }
 
-async function startCamera(videoId, statusId, onDetect) {
+// NW-7(クリックポスト)は細いバーが多いため、高い解像度を要求する（端末が対応しない場合は自動で下がる）
+function cameraConstraints(highRes) {
+  const v = { facingMode: "environment" };
+  if (highRes) { v.width = { ideal: CFG.CAMERA.width }; v.height = { ideal: CFG.CAMERA.height }; }
+  return { video: v };
+}
+
+// 連続オートフォーカスが使える端末(主にAndroid)では有効にする。iPhoneは常に自動のため対象外
+async function enableContinuousFocus(track) {
+  try {
+    const caps = track.getCapabilities ? track.getCapabilities() : {};
+    if (Array.isArray(caps.focusMode) && caps.focusMode.includes("continuous")) {
+      await track.applyConstraints({ advanced: [{ focusMode: "continuous" }] });
+    }
+  } catch (e) {}
+}
+
+// onTick(result): 1回の読み取り処理ごとに呼ぶ（読み取りテストの「検出中」表示用。result は読めなかったとき null）
+async function startCamera(videoId, statusId, onDetect, onTick) {
   const status = document.getElementById(statusId);
   if (!zxingReady) {
     status.textContent = "バーコード読取ライブラリを読み込めませんでした。下の入力欄をご利用ください。";
-    return;
+    return null;
   }
-  const reader = makeReader();
+  const callback = (result) => {
+    if (onTick) onTick(result);
+    if (result) onDetect(result.getText(), result);
+  };
+  status.textContent = "バーコードを枠内に合わせてください";
+  let reader = makeReader();
   readers[videoId] = reader;
   try {
-    status.textContent = "バーコードを枠内に合わせてください";
-    await reader.decodeFromConstraints({ video: { facingMode: "environment" } }, videoId,
-      (result) => { if (result) onDetect(result.getText(), result); });
+    await reader.decodeFromConstraints(cameraConstraints(true), videoId, callback);
   } catch (e) {
-    status.textContent = "カメラを起動できません。下の入力欄から入力してください。";
+    // 高解像度の指定で起動できない端末向けに、指定なしで1回だけやり直す（カメラの許可が無い場合はやり直さない）
+    try { reader.reset(); } catch (e2) {}
+    if (readers[videoId] !== reader) return null;   // 待っている間に画面を移った
+    if (e && (e.name === "NotAllowedError" || e.name === "SecurityError")) {
+      status.textContent = "カメラの使用が許可されていません。下の入力欄から入力してください。";
+      return null;
+    }
+    reader = makeReader();
+    readers[videoId] = reader;
+    try {
+      await reader.decodeFromConstraints(cameraConstraints(false), videoId, callback);
+    } catch (e3) {
+      status.textContent = "カメラを起動できません。下の入力欄から入力してください。";
+      return null;
+    }
   }
+  const video = document.getElementById(videoId);
+  const track = video.srcObject && video.srcObject.getVideoTracks ? video.srcObject.getVideoTracks()[0] : null;
+  if (track) await enableContinuousFocus(track);
+  return track;
 }
 
 function stopAllCameras() {
@@ -881,6 +928,36 @@ function showComplete(pkg) {
 
 /* ---------- 読み取りテスト: 生の値・バーコード形式・追跡番号としての判定を表示（記録しない） ---------- */
 let lastRead = "";
+let diagTimer = null;
+let diagRun = 0;
+// 切り分け用: 実際のカメラ解像度・フォーカス・読み取り処理が回っているか（検出中）を表示する
+async function startReadTest() {
+  clearInterval(diagTimer);
+  const run = ++diagRun;
+  const diag = document.getElementById("camDiag");
+  diag.textContent = "カメラ情報: 起動中…";
+  const video = document.getElementById("videoTest");
+  let ticks = 0, lastOkAt = 0, lastFmt = "";
+  const track = await startCamera("videoTest", "scanStatusTest", handleReadTest, (result) => {
+    ticks++;
+    if (result) { lastOkAt = Date.now(); lastFmt = ZXing.BarcodeFormat[result.getBarcodeFormat()] || ""; }
+  });
+  if (run !== diagRun || !readers.videoTest) return;   // 起動失敗、または画面を移った
+  const settings = track && track.getSettings ? track.getSettings() : {};
+  const focus = settings.focusMode ? settings.focusMode : "取得できず(iPhoneは自動)";
+  let prev = performance.now();
+  const render = () => {
+    const now = performance.now(), rate = ticks * 1000 / (now - prev);
+    ticks = 0; prev = now;
+    const recent = Date.now() - lastOkAt < 1500;
+    diag.innerHTML = `
+      <div><span class="live ${rate > 0 ? "on" : ""}"></span><b>${rate > 0 ? "検出中" : "停止中"}</b>（読み取り処理 ${rate.toFixed(1)}回/秒）${recent ? ` ・ <b>${escapeHtml(lastFmt)} を検出</b>` : ""}</div>
+      <div>実際の解像度: <b>${video.videoWidth}×${video.videoHeight}</b>（要求 ${CFG.CAMERA.width}×${CFG.CAMERA.height}）・ フォーカス: ${escapeHtml(focus)}</div>
+      <div>ZXing ${escapeHtml(ZXING_VERSION)} ・ TRY_HARDER: ${CFG.CAMERA.tryHarder ? "有効" : "無効"}</div>`;
+  };
+  render();
+  diagTimer = setInterval(() => { if (run !== diagRun || !readers.videoTest) { clearInterval(diagTimer); return; } render(); }, 1000);
+}
 function handleReadTest(raw, result) {
   if (raw === lastRead) return;   // 同じバーコードを読み続けている間は1回だけ
   lastRead = raw;
