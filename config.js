@@ -3,8 +3,7 @@ window.APP_CONFIG = {
   // Apps Script の WebアプリURL（「デプロイを管理」で既存デプロイを更新すればURLは変わらない）
   GAS_URL: "https://script.google.com/macros/s/AKfycbzUdOLvKGwpf8UKGY3e319niJH_xvL-HtLC6Wv4Ow9G2Ir9vAnBBHVgFhiKg5ovnD7O/exec",
 
-  // 担当者（実際のスタッフ名に差し替える）
-  WORKERS: ["佐藤", "鈴木", "田中", "山本"],
+  // 担当者は、スプレッドシートの「担当者」シート（A2から下）から読み込む（ここには書かない）
 
   // カメラ: NW-7(クリックポスト)の細いバーを読むため高い解像度を要求する（端末が対応しない場合は自動で下がる）
   //   tryHarder: 読み取り精度は少し上がるが、1920x1080では読めないフレームの処理が約9倍重くなるため既定は無効

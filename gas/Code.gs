@@ -8,6 +8,7 @@
  *     action=list      … 本日出荷リスト全件（出荷指示書の印刷ページ・照合ツールの一覧）
  *     action=order     … 注文1件の最新状態（照合ツール STEP1。&id=注文番号）
  *     action=tracking  … 追跡番号が記録済みか（照合ツール STEP3。&no=追跡番号）
+ *     action=workers   … 「担当者」シートの担当者名（照合ツールのホーム画面の担当者ボタン）
  *     action=test      … 動作確認用（「記録」シートにテスト行を追加）
  *
  * トークン: スクリプトプロパティ SECRET_TOKEN の値（コードには書かない）。未設定なら全リクエストを拒否する。
@@ -21,6 +22,8 @@ var WORK_LOG_SHEET_NAME = "記録";
 var LIST_COL_ORDERED = 8;   // H列
 // 出荷指示書の印刷記録（このスクリプトだけが追記する。PC側の同期は触らない）
 var PRINT_LOG_SHEET_NAME = "印刷記録";
+// 担当者（A1=見出し、A2から下に1行1名。このスクリプトは読むだけ）
+var WORKERS_SHEET_NAME = "担当者";
 var TZ = "Asia/Tokyo";
 // 「記録」シートの列。既存の7列の並びは変えず、末尾(H列)に「追跡番号」を追加する
 var WORK_LOG_HEADER = ["日時", "注文ID", "チャネル", "お届け先", "商品内訳", "推奨資材", "担当者", "追跡番号"];
@@ -43,6 +46,7 @@ function authorized_(token) {
  *   {WebアプリURL}?token=XXXX&action=list
  *   {WebアプリURL}?token=XXXX&action=order&id=398655-20261002-0081808899
  *   {WebアプリURL}?token=XXXX&action=tracking&no=123456789012
+ *   {WebアプリURL}?token=XXXX&action=workers
  */
 function doGet(e) {
   if (!authorized_(e.parameter.token)) {
@@ -61,6 +65,10 @@ function doGet(e) {
 
   if (action === "tracking") {
     return jsonOutput(findTracking_(String(e.parameter.no || "").trim()));
+  }
+
+  if (action === "workers") {
+    return jsonOutput(getWorkers_());
   }
 
   if (action === "test") {
@@ -254,6 +262,32 @@ function getOrCreatePrintLogSheet_() {
     sheet.appendRow(["注文ID", "印刷日時", "端末"]);
   }
   return sheet;
+}
+
+
+/**
+ * 「担当者」シートのA2から下 → { workers: ["前田", ...] }
+ * 空白行は無視し、前後の空白(全角を含む)を除き、重複は1つにする（シートの並び順のまま）。
+ * シートが無い・名前が1つも無い場合は { workers: [], note: 理由 }
+ */
+function getWorkers_() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(WORKERS_SHEET_NAME);
+  if (!sheet) {
+    return { workers: [], note: "「" + WORKERS_SHEET_NAME + "」シートがありません" };
+  }
+  var workers = [];
+  var last = sheet.getLastRow();
+  if (last >= 2) {
+    var values = sheet.getRange(2, 1, last - 1, 1).getValues();
+    for (var i = 0; i < values.length; i++) {
+      var name = cellText_(values[i][0]).trim();
+      if (name && workers.indexOf(name) < 0) workers.push(name);
+    }
+  }
+  if (!workers.length) {
+    return { workers: [], note: "「" + WORKERS_SHEET_NAME + "」シートに名前がありません（A2から下に1行1名で入力）" };
+  }
+  return { workers: workers };
 }
 
 

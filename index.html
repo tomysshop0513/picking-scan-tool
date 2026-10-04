@@ -96,6 +96,10 @@
     font-size:13px;color:#5a6b66;
   }
   .worker-current b{color:var(--brand-dark);}
+  .worker-note{font-size:13px;color:#5a6b66;line-height:1.6;margin-top:8px;}
+  .worker-note.ng{color:var(--ng);font-weight:700;}
+  .worker-note.amber{color:#8a5a00;}
+  .worker-note button{margin-left:8px;background:#fff;border:1.5px solid var(--line);border-radius:999px;padding:5px 12px;font-size:13px;font-weight:700;color:var(--ink);}
 
   /* Scan screen */
   .scan-box{
@@ -280,6 +284,7 @@
       <div class="worker-select" id="workerSelect">
         <div class="worker-label">担当者を選択してください</div>
         <div class="worker-buttons" id="workerButtons"></div>
+        <div class="worker-note" id="workerNote"></div>
       </div>
       <button class="primary-btn" id="startBtn">出荷指示書のバーコードを読む</button>
       <p class="hint">出荷指示書に印字された注文番号のバーコードを読み取ると、ピッキングを開始します。</p>
@@ -483,14 +488,77 @@ document.getElementById("nextOrderBtn").addEventListener("click", () => {
 });
 
 /* ---------- ホーム画面 ---------- */
+/* 担当者: 「担当者」シートから取得する。成功したらこの端末に保存し、通信できないときは保存済みのリストを使う */
+const WORKERS_STORAGE = "pickingToolWorkers";
+let workers = [];
+let workersState = { kind: "loading", note: "" };   // loading / ok / cache(保存済みを表示中) / empty(シートに名前が無い) / none(取得できず保存も無い)
+let workersRun = 0;
+
+function cleanWorkers(list) {
+  const out = [];
+  (Array.isArray(list) ? list : []).forEach(v => {
+    const name = String(v ?? "").trim();
+    if (name && !out.includes(name)) out.push(name);
+  });
+  return out;
+}
+function readSavedWorkers() {
+  try {
+    const v = JSON.parse(localStorage.getItem(WORKERS_STORAGE) || "null");
+    return Array.isArray(v) ? cleanWorkers(v) : null;
+  } catch (e) { return null; }
+}
+function saveWorkers(list) {
+  try { localStorage.setItem(WORKERS_STORAGE, JSON.stringify(list)); } catch (e) {}
+}
+
+async function loadWorkers() {
+  const run = ++workersRun;
+  workersState = { kind: "loading", note: "" };
+  renderWorkerSelect();
+  let next;
+  try {
+    const res = await apiGet("workers");
+    if (!Array.isArray(res.workers)) throw new Error("担当者の応答が正しくありません");
+    const list = cleanWorkers(res.workers);
+    saveWorkers(list);   // 0件もシートの最新の状態として保存する（古いリストを使い続けない）
+    next = list.length ? { list, kind: "ok", note: "" }
+                       : { list, kind: "empty", note: res.note || "「担当者」シートに名前がありません" };
+  } catch (e) {
+    const reason = e.code === "network" ? "通信できません" : e.message;
+    const saved = readSavedWorkers();
+    next = saved && saved.length
+      ? { list: saved, kind: "cache", note: `担当者を更新できませんでした（${reason}）。前回取得したリストを表示しています。` }
+      : { list: [], kind: "none", note: `担当者を取得できません（${reason}）` };
+  }
+  if (run !== workersRun) return;   // 後から始めた取得を優先する
+  workers = next.list;
+  workersState = { kind: next.kind, note: next.note };
+  if (currentWorker && !workers.includes(currentWorker)) currentWorker = null;   // リストから消えた担当者は選択を解除
+  renderWorkerSelect();
+}
+
 function renderWorkerSelect() {
   const wrap = document.getElementById("workerButtons");
   const label = document.querySelector("#workerSelect .worker-label");
+  const note = document.getElementById("workerNote");
   wrap.innerHTML = "";
   label.innerHTML = currentWorker
     ? `担当者: <b style="color:var(--brand-dark)">${escapeHtml(currentWorker)}</b> <span style="font-weight:400;">(タップで変更)</span>`
     : "担当者を選択してください";
-  CFG.WORKERS.forEach(name => {
+  const st = workersState;
+  if (st.kind === "loading") {
+    note.className = "worker-note";
+    note.textContent = workers.length ? "" : "担当者を読み込み中…";
+  } else if (st.kind === "ok") {
+    note.className = "worker-note";
+    note.textContent = "";
+  } else {
+    note.className = "worker-note " + (st.kind === "cache" ? "amber" : "ng");
+    note.innerHTML = `${escapeHtml(st.note)}<button id="workerRetryBtn">再取得</button>`;
+    note.querySelector("#workerRetryBtn").addEventListener("click", loadWorkers);
+  }
+  workers.forEach(name => {
     const btn = document.createElement("button");
     btn.className = "worker-btn" + (currentWorker === name ? " selected" : "");
     btn.textContent = name;
@@ -501,6 +569,7 @@ function renderWorkerSelect() {
 
 function renderHome() {
   renderWorkerSelect();
+  loadWorkers();
   loadList();
 }
 
@@ -533,7 +602,7 @@ async function loadList() {
     list.appendChild(div);
   });
 }
-document.getElementById("reloadBtn").addEventListener("click", loadList);
+document.getElementById("reloadBtn").addEventListener("click", () => { loadWorkers(); loadList(); });
 document.getElementById("readTestBtn").addEventListener("click", () => {
   document.getElementById("readLog").innerHTML = "";
   lastRead = "";
