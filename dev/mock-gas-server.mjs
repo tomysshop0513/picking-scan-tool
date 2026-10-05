@@ -144,10 +144,10 @@ http.createServer((req, res) => {
     });
     return;
   }
-  // 照合ツールの静的ファイル（gas/・dev/・隠しファイルは配信しない）
+  // 照合ツールの静的ファイル（gas/・dev/・local/(接続キー入りのQR)・隠しファイルは配信しない）
   const rel = url.pathname === "/" ? "index.html" : decodeURIComponent(url.pathname.slice(1));
   const file = path.join(ROOT, rel);
-  if (!file.startsWith(ROOT + path.sep) || /^(gas|dev|\.)/.test(rel) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
+  if (!file.startsWith(ROOT + path.sep) || /^(gas|dev|local|\.)/.test(rel) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
     res.writeHead(404);
     return res.end("not found");
   }

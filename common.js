@@ -4,8 +4,11 @@
   const KEY_STORAGE = "pickingToolKey";
 
   /* ---------- 接続キー（Apps Script のトークン） ----------
-     公開ページのソースに書かないため、各端末の設定画面で手入力してブラウザに保存する。
-     URL には載せない（外部サービス経由で開いたときに、第三者のアクセスログに残るため）。 */
+     公開ページのソースに書かないため、各端末でブラウザに保存する。設定方法は2つ:
+       - 設定画面で手入力する
+       - QRコード（https://…/picking-scan-tool/#key=接続キー）をスマホのカメラで読む
+     URL の ?key=（クエリ）は使わない: サーバーに送られ、外部サービス経由で開いたときに第三者のアクセスログに残るため。
+     #key=（ハッシュ）はブラウザからサーバーへ送られない。読んだらすぐ URL から消し、アドレスバー・履歴に残さない。 */
   function readKey() {
     try { return localStorage.getItem(KEY_STORAGE) || ""; } catch (e) { return memKey; }
   }
@@ -18,6 +21,35 @@
     memKey = "";
     try { localStorage.removeItem(KEY_STORAGE); } catch (e) {}
   }
+  /** URL の #key=… を保存する（すでにキーがあっても上書き＝キー変更時の再設定に使う）。
+      ensureKey() より前に判定されるよう、このファイルの読み込み時に実行する。キーの値は画面にもコンソールにも出さない */
+  function takeKeyFromHash() {
+    const hash = location.hash.replace(/^#/, "");
+    if (!/(^|&)key=/.test(hash)) return;
+    let key = "";
+    try { key = (new URLSearchParams(hash).get("key") || "").trim(); } catch (e) {}
+    try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {}
+    if (!key) return;
+    saveKey(key);
+    showToast("接続キーを保存しました");
+  }
+
+  function showToast(text) {
+    const show = () => {
+      const el = document.createElement("div");
+      el.textContent = text;
+      el.setAttribute("role", "status");
+      el.style.cssText = "position:fixed;left:50%;top:16px;transform:translateX(-50%);z-index:9999;" +
+        "background:#1f7a4d;color:#fff;font-weight:700;font-size:15px;padding:10px 18px;border-radius:999px;" +
+        "box-shadow:0 4px 16px rgba(0,0,0,.2);max-width:calc(100% - 32px);";
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 2500);
+    };
+    if (document.body) show(); else document.addEventListener("DOMContentLoaded", show);
+  }
+
+  takeKeyFromHash();
+
   /** 接続キーが無ければ入力欄を表示し、保存されたら onReady() を呼ぶ */
   function ensureKey(container, onReady, force = false) {
     if (readKey() && !force) { container.innerHTML = ""; onReady(); return; }
