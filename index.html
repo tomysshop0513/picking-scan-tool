@@ -109,7 +109,19 @@
     aspect-ratio:16/7;
     display:flex;align-items:center;justify-content:center;
   }
-  .scan-box video{width:100%;height:100%;object-fit:cover;}
+  .scan-box video{width:100%;height:100%;object-fit:cover;transform-origin:50% 50%;}   /* デジタルズーム時は scale(2) で中央を拡大（枠は16:7のまま） */
+  .zoom-toggle{
+    position:absolute;top:8px;right:8px;z-index:2;
+    display:flex;align-items:center;gap:2px;
+    background:rgba(0,0,0,.55);border-radius:999px;padding:3px 4px 3px 10px;
+    color:#fff;font-size:12px;font-weight:700;
+  }
+  .zoom-toggle span{margin-right:4px;}
+  .zoom-toggle button{
+    background:transparent;color:#fff;border:none;border-radius:999px;
+    padding:6px 10px;font-size:13px;font-weight:800;
+  }
+  .zoom-toggle button.on{background:#fff;color:var(--brand-dark);}
   .scan-frame{display:none;}
   .scan-status{
     text-align:center;color:var(--ink);font-size:13px;
@@ -118,6 +130,7 @@
   .flash-ok, .flash-ng{
     position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
     font-size:64px;color:#fff;font-weight:800;opacity:0;
+    pointer-events:none;z-index:3;
   }
   .flash-ok{background:rgba(28,138,76,.92);}
   .flash-ng{background:rgba(194,59,47,.92);}
@@ -620,7 +633,9 @@ document.getElementById("startBtn").addEventListener("click", () => {
 /* ---------- カメラ / バーコード検出 (ZXing) ---------- */
 const zxingReady = typeof ZXing !== "undefined";
 const ZXING_VERSION = "0.23.0";   // <script src> の版と合わせる
-let readers = {};
+const SCAN_INTERVAL_MS = 200;     // 読み取り処理の間隔
+const ZOOM_STORAGE = "scanZoom";  // ズーム 1x/2x の選択（端末ごとに記憶）
+let cameras = {};                 // videoId → 起動中のカメラ（stream・タイマー・ズーム状態）
 
 function makeReader() {
   if (!zxingReady) return null;
@@ -631,14 +646,16 @@ function makeReader() {
   hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,
     [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.CODE_39, F.CODABAR, F.ITF].filter(f => f !== undefined));
   if (CFG.CAMERA.tryHarder) hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
-  return new ZXing.BrowserMultiFormatReader(hints);
+  const reader = new ZXing.MultiFormatReader();
+  reader.setHints(hints);
+  return reader;
 }
 
-// NW-7(クリックポスト)は細いバーが多いため、高い解像度を要求する（端末が対応しない場合は自動で下がる）
+// NW-7(クリックポスト)は細いバーが多いため、背面カメラに高い解像度を要求する（端末が対応しない場合は自動で下がる）
 function cameraConstraints(highRes) {
-  const v = { facingMode: "environment" };
+  const v = { facingMode: { ideal: "environment" } };
   if (highRes) { v.width = { ideal: CFG.CAMERA.width }; v.height = { ideal: CFG.CAMERA.height }; }
-  return { video: v };
+  return { video: v, audio: false };
 }
 
 // 連続オートフォーカスが使える端末(主にAndroid)では有効にする。iPhoneは常に自動のため対象外
@@ -651,6 +668,99 @@ async function enableContinuousFocus(track) {
   } catch (e) {}
 }
 
+/* ---------- ズーム 1x/2x ---------- */
+function getZoomPref() {
+  try { return localStorage.getItem(ZOOM_STORAGE) === "1" ? 1 : 2; } catch (e) { return 2; }   // 既定は 2x
+}
+function setZoomPref(z) {
+  try { localStorage.setItem(ZOOM_STORAGE, String(z)); } catch (e) {}
+}
+
+// 2x のとき、カメラ自体のズーム(track の zoom)が2倍まで使えればそれを使う。
+// 使えない端末では、映像中央50%を切り抜いて読み取り、画面も同じ範囲を2倍に拡大表示する(デジタルズーム)
+async function applyZoom(cam) {
+  const want = getZoomPref();
+  const caps = cam.track && cam.track.getCapabilities ? cam.track.getCapabilities() : {};
+  const z = caps.zoom;
+  let optical = false;
+  if (z && typeof z.max === "number") {
+    const target = want === 2 ? 2 : Math.max(z.min || 1, 1);
+    if (target <= z.max) {
+      try {
+        await cam.track.applyConstraints({ advanced: [{ zoom: target }] });
+        optical = want === 2;
+      } catch (e) {}
+    }
+  }
+  if (cam.stopped) return;
+  cam.crop = want === 2 && !optical ? 2 : 1;
+  cam.zoomMode = want === 1 ? "1x" : (optical ? "光学2x" : "デジタル2x");
+  cam.video.style.transform = cam.crop === 2 ? "scale(2)" : "";
+}
+
+// 各カメラ枠の右上に「ズーム 1x/2x」切替を付ける。押すと記憶し、起動中のカメラにすぐ反映する
+function renderZoomToggles() {
+  const z = getZoomPref();
+  document.querySelectorAll(".zoom-toggle button").forEach(b => b.classList.toggle("on", Number(b.dataset.zoom) === z));
+}
+document.querySelectorAll(".scan-box").forEach(box => {
+  const t = document.createElement("div");
+  t.className = "zoom-toggle";
+  t.innerHTML = `<span>ズーム</span><button type="button" data-zoom="1">1x</button><button type="button" data-zoom="2">2x</button>`;
+  t.addEventListener("click", (ev) => {
+    const b = ev.target.closest("button");
+    if (!b) return;
+    setZoomPref(Number(b.dataset.zoom));
+    renderZoomToggles();
+    Object.values(cameras).forEach(cam => { if (cam.track) applyZoom(cam); });
+  });
+  box.appendChild(t);
+});
+renderZoomToggles();
+
+async function openStream(cam) {
+  try {
+    return await navigator.mediaDevices.getUserMedia(cameraConstraints(true));
+  } catch (e) {
+    // 高解像度の指定で起動できない端末向けに、指定なしで1回だけやり直す（カメラの許可が無い場合はやり直さない）
+    if (e && (e.name === "NotAllowedError" || e.name === "SecurityError")) throw e;
+    if (cam.stopped) return null;
+    return await navigator.mediaDevices.getUserMedia(cameraConstraints(false));
+  }
+}
+
+// 約200msごとに、映像(デジタルズーム時は中央50%)を canvas に写して ZXing でデコードする
+function scanLoop(cam, onDetect, onTick) {
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  const reader = makeReader();
+  const tick = () => {
+    if (cam.stopped) return;
+    const started = performance.now();
+    const v = cam.video, vw = v.videoWidth, vh = v.videoHeight;
+    if (vw && vh && v.readyState >= 2) {
+      const sw = Math.round(vw / cam.crop), sh = Math.round(vh / cam.crop);
+      if (canvas.width !== sw || canvas.height !== sh) { canvas.width = sw; canvas.height = sh; }
+      ctx.drawImage(v, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0, sw, sh);
+      let result = null;
+      try {
+        const bitmap = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(new ZXing.HTMLCanvasElementLuminanceSource(canvas)));
+        result = reader.decodeWithState(bitmap);
+      } catch (e) {}   // 見つからない(NotFound/Checksum/Format)フレームは読み飛ばす
+      if (onTick) onTick(result);
+      if (result) onDetect(result.getText(), result);
+    }
+    if (cam.stopped) return;
+    cam.timer = setTimeout(tick, Math.max(0, SCAN_INTERVAL_MS - (performance.now() - started)));
+  };
+  tick();
+}
+
+function stopStream(cam) {
+  if (cam.stream) cam.stream.getTracks().forEach(t => { try { t.stop(); } catch (e) {} });
+  cam.stream = null;
+}
+
 // onTick(result): 1回の読み取り処理ごとに呼ぶ（読み取りテストの「検出中」表示用。result は読めなかったとき null）
 async function startCamera(videoId, statusId, onDetect, onTick) {
   const status = document.getElementById(statusId);
@@ -658,41 +768,43 @@ async function startCamera(videoId, statusId, onDetect, onTick) {
     status.textContent = "バーコード読取ライブラリを読み込めませんでした。下の入力欄をご利用ください。";
     return null;
   }
-  const callback = (result) => {
-    if (onTick) onTick(result);
-    if (result) onDetect(result.getText(), result);
-  };
-  status.textContent = "バーコードを枠内に合わせてください";
-  let reader = makeReader();
-  readers[videoId] = reader;
-  try {
-    await reader.decodeFromConstraints(cameraConstraints(true), videoId, callback);
-  } catch (e) {
-    // 高解像度の指定で起動できない端末向けに、指定なしで1回だけやり直す（カメラの許可が無い場合はやり直さない）
-    try { reader.reset(); } catch (e2) {}
-    if (readers[videoId] !== reader) return null;   // 待っている間に画面を移った
-    if (e && (e.name === "NotAllowedError" || e.name === "SecurityError")) {
-      status.textContent = "カメラの使用が許可されていません。下の入力欄から入力してください。";
-      return null;
-    }
-    reader = makeReader();
-    readers[videoId] = reader;
-    try {
-      await reader.decodeFromConstraints(cameraConstraints(false), videoId, callback);
-    } catch (e3) {
-      status.textContent = "カメラを起動できません。下の入力欄から入力してください。";
-      return null;
-    }
-  }
   const video = document.getElementById(videoId);
-  const track = video.srcObject && video.srcObject.getVideoTracks ? video.srcObject.getVideoTracks()[0] : null;
-  if (track) await enableContinuousFocus(track);
-  return track;
+  const cam = { video, stream: null, track: null, timer: null, stopped: false, crop: 1, zoomMode: "1x" };
+  cameras[videoId] = cam;
+  status.textContent = "バーコードを枠内に合わせてください";
+  try {
+    cam.stream = await openStream(cam);
+  } catch (e) {
+    if (cam.stopped) return null;   // 待っている間に画面を移った
+    status.textContent = (e && (e.name === "NotAllowedError" || e.name === "SecurityError"))
+      ? "カメラの使用が許可されていません。下の入力欄から入力してください。"
+      : "カメラを起動できません。下の入力欄から入力してください。";
+    delete cameras[videoId];
+    return null;
+  }
+  // 以降、await のたびに「待っている間に画面を移った」かを確認し、移っていればカメラを止める
+  if (cam.stopped) { stopStream(cam); return null; }
+  cam.track = cam.stream.getVideoTracks()[0] || null;
+  video.srcObject = cam.stream;
+  try { await video.play(); } catch (e) {}
+  if (cam.track) {
+    await enableContinuousFocus(cam.track);
+    await applyZoom(cam);
+  }
+  if (cam.stopped) { stopStream(cam); return null; }
+  scanLoop(cam, onDetect, onTick);
+  return cam.track;
 }
 
 function stopAllCameras() {
-  Object.values(readers).forEach(r => { try { r.reset(); } catch (e) {} });
-  readers = {};
+  Object.values(cameras).forEach(cam => {
+    cam.stopped = true;
+    clearTimeout(cam.timer);
+    stopStream(cam);
+    cam.video.srcObject = null;
+    cam.video.style.transform = "";
+  });
+  cameras = {};
 }
 
 /* ---------- 音・表示フィードバック ---------- */
@@ -1011,21 +1123,24 @@ async function startReadTest() {
     ticks++;
     if (result) { lastOkAt = Date.now(); lastFmt = ZXing.BarcodeFormat[result.getBarcodeFormat()] || ""; }
   });
-  if (run !== diagRun || !readers.videoTest) return;   // 起動失敗、または画面を移った
+  if (run !== diagRun || !cameras.videoTest) return;   // 起動失敗、または画面を移った
   const settings = track && track.getSettings ? track.getSettings() : {};
   const focus = settings.focusMode ? settings.focusMode : "取得できず(iPhoneは自動)";
   let prev = performance.now();
   const render = () => {
+    const cam = cameras.videoTest;
+    if (!cam) return;
     const now = performance.now(), rate = ticks * 1000 / (now - prev);
     ticks = 0; prev = now;
     const recent = Date.now() - lastOkAt < 1500;
     diag.innerHTML = `
       <div><span class="live ${rate > 0 ? "on" : ""}"></span><b>${rate > 0 ? "検出中" : "停止中"}</b>（読み取り処理 ${rate.toFixed(1)}回/秒）${recent ? ` ・ <b>${escapeHtml(lastFmt)} を検出</b>` : ""}</div>
       <div>実際の解像度: <b>${video.videoWidth}×${video.videoHeight}</b>（要求 ${CFG.CAMERA.width}×${CFG.CAMERA.height}）・ フォーカス: ${escapeHtml(focus)}</div>
-      <div>ZXing ${escapeHtml(ZXING_VERSION)} ・ TRY_HARDER: ${CFG.CAMERA.tryHarder ? "有効" : "無効"}</div>`;
+      <div>ズーム: <b>${escapeHtml(cam.zoomMode)}</b>${cam.crop === 2 ? "（中央50%を切り抜いて読み取り）" : ""} ・ 読み取り範囲: ${Math.round(video.videoWidth / cam.crop)}×${Math.round(video.videoHeight / cam.crop)}</div>
+      <div>ZXing ${escapeHtml(ZXING_VERSION)} ・ 読み取り間隔: ${SCAN_INTERVAL_MS}ms ・ TRY_HARDER: ${CFG.CAMERA.tryHarder ? "有効" : "無効"}</div>`;
   };
   render();
-  diagTimer = setInterval(() => { if (run !== diagRun || !readers.videoTest) { clearInterval(diagTimer); return; } render(); }, 1000);
+  diagTimer = setInterval(() => { if (run !== diagRun || !cameras.videoTest) { clearInterval(diagTimer); return; } render(); }, 1000);
 }
 function handleReadTest(raw, result) {
   if (raw === lastRead) return;   // 同じバーコードを読み続けている間は1回だけ
