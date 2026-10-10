@@ -39,36 +39,54 @@
   @media print{
     body{background:#fff;}
     .screen-only{display:none !important;}
+    body > [role="status"]{display:none !important;}   /* 「接続キーを保存しました」等の通知を写さない */
     #printArea{display:block;}
   }
-  .sheet{width:210mm;height:297mm;page-break-after:always;break-after:page;overflow:hidden;}
+  /* A4 1枚に 2列×3段（1枠 105×99mm）。商品が多い注文は縦2枠、それでも収まらなければ1ページを使う */
+  .sheet{width:210mm;height:297mm;page-break-after:always;break-after:page;overflow:hidden;
+         display:grid;grid-template-columns:repeat(2,105mm);grid-template-rows:repeat(3,99mm);}
+  .sheet.whole{display:block;height:auto;min-height:297mm;overflow:visible;}
   .sheet:last-child{page-break-after:auto;break-after:auto;}
-  .slip{height:148.5mm;padding:10mm 12mm 8mm;position:relative;overflow:hidden;}
-  .slip + .slip{border-top:0.4mm dashed #555;}
-  .slip + .slip::before{content:"✂ 切り取り線";position:absolute;top:-3.2mm;left:12mm;font-size:8pt;background:#fff;padding:0 2mm;color:#555;}
-  .slip .head{display:flex;justify-content:space-between;align-items:flex-start;gap:6mm;}
-  .slip .barcode svg{display:block;max-width:150mm;height:auto;}  /* 長い注文番号でも縦横比を保って縮める */
-  .slip .order-no{font-family:monospace;font-size:11pt;margin-top:1mm;letter-spacing:.03em;}
-  .slip .channel{font-size:12pt;font-weight:800;border:0.4mm solid #000;border-radius:2mm;padding:1mm 3mm;white-space:nowrap;display:inline-block;}
-  .slip .right{text-align:right;}
-  .slip .stamp{font-size:8pt;color:#333;margin-bottom:1.5mm;white-space:nowrap;}
+  .slip{padding:5mm 5mm 3.5mm;overflow:hidden;display:flex;flex-direction:column;min-width:0;}
+  .sheet.whole .slip{width:210mm;min-height:297mm;padding:10mm 12mm 8mm;overflow:visible;}
+  /* 切り取り線（枠と枠の間だけ。縦2枠の注文の途中には引かない） */
+  .slip.cut-r{border-right:0.2mm dashed #aaa;}
+  .slip.cut-b{border-bottom:0.2mm dashed #aaa;}
+  .slip .top{display:flex;justify-content:space-between;align-items:center;gap:3mm;margin-bottom:1.5mm;}
+  .slip .channel{font-size:10pt;font-weight:800;border:0.35mm solid #000;border-radius:1.5mm;padding:0.3mm 2.5mm;white-space:nowrap;}
+  .slip .stamp{font-size:7pt;color:#333;white-space:nowrap;}
+  /* バーコードは枠の幅いっぱいに横へ伸ばす（全バーが同じ倍率で伸びるので、線の太さの比は変わらない） */
+  .slip svg.bc{display:block;width:100%;height:13mm;}
+  .sheet.whole .slip svg.bc{width:120mm;height:16mm;margin:0 auto;}
+  /* 1ページに収まらない注文は次のページへ続ける（行の途中では切らない。続きのページにも余白・表の見出し・注文番号を出す） */
+  .sheet.whole .slip{-webkit-box-decoration-break:clone;box-decoration-break:clone;}
+  .sheet.whole .slip tr{break-inside:avoid;}
+  .sheet.whole .slip .pkg{break-before:avoid;}   /* 梱包資材だけが次のページに残らないよう、最後の商品行と一緒に送る */
+  .slip thead .cont{display:none;}
+  .sheet.whole .slip thead .cont{display:table-row;}
+  .slip thead .cont th{background:#fff;border:none;padding:0 0 1mm;font-size:8pt;font-weight:400;color:#555;}
+  .slip .order-no{font-family:Consolas,monospace;font-size:10pt;text-align:center;margin-top:0.8mm;letter-spacing:.02em;}
+  .slip .dest{font-size:15pt;font-weight:900;margin:2mm 0 1.8mm;line-height:1.2;word-break:break-all;}
+  .slip table{width:100%;border-collapse:collapse;font-size:9.5pt;line-height:1.3;}
+  .slip th, .slip td{border:0.25mm solid #000;padding:0.9mm 1.5mm;}
+  .slip th{background:#eee;font-size:7.5pt;text-align:left;}
+  .slip td.qty{width:13mm;text-align:center;font-size:13pt;font-weight:900;}
+  .slip .pkg{margin-top:1.8mm;font-size:9pt;line-height:1.3;}
+  .slip .pkg b{font-size:10.5pt;}
+  .slip .pkg .note{font-size:7.5pt;}
+  .slip .foot{margin-top:auto;padding-top:1.2mm;font-size:6.5pt;color:#555;display:flex;justify-content:space-between;gap:2mm;}
+  /* 高さの計測用（画面外。1枠の幅で、高さは中身なり） */
+  .measure{position:absolute;left:-10000px;top:0;visibility:hidden;}
+  .measure .slip{width:105mm;}
   .toolbar label{font-size:14px;display:flex;align-items:center;gap:4px;}
   tr.printed td{color:#8a9a95;}
-  .slip .dest{font-size:24pt;font-weight:900;margin:5mm 0 4mm;line-height:1.25;word-break:break-all;}
-  .slip table{width:100%;border-collapse:collapse;font-size:11pt;}
-  .slip th, .slip td{border:0.3mm solid #000;padding:1.5mm 2mm;}
-  .slip th{background:#eee;font-size:9pt;text-align:left;}
-  .slip td.qty{width:20mm;text-align:center;font-size:15pt;font-weight:900;}
-  .slip .pkg{margin-top:3mm;font-size:11pt;}
-  .slip .pkg b{font-size:13pt;}
-  .slip .foot{position:absolute;bottom:5mm;left:12mm;right:12mm;font-size:8pt;color:#555;display:flex;justify-content:space-between;}
 </style>
 </head>
 <body>
 <div class="screen-only">
   <h1>出荷指示書の印刷</h1>
   <div class="sub">本日出荷リストの「未処理」で、まだ印刷していない注文を表示しています（注文日時の古い順）。
-    1注文=A4の半分（上下2件、切り取り線つき）。警告がある注文（赤字）は梱包できないため印刷できません。</div>
+    A4 1枚に6件（2列×3段、切り取り線つき。商品が多い注文は縦2枠または1ページ）。警告がある注文（赤字）は梱包できないため印刷できません。</div>
   <div id="keyArea"></div>
   <div class="toolbar">
     <button class="btn-sub" id="reloadBtn">一覧を更新</button>
@@ -171,22 +189,82 @@ function slipHtml(o, printedAt, no, total) {
   const pkg = estimatePackage(o.items);
   return `
     <div class="slip">
-      <div class="head">
-        <div class="barcode"><svg class="bc" data-code="${escapeHtml(o.orderId)}"></svg>
-          <div class="order-no">${escapeHtml(o.orderId)}</div></div>
-        <div class="right">
-          <div class="stamp">印刷 ${escapeHtml(printedAt)}　${no}/${total}</div>
-          <div class="channel">${escapeHtml(o.channel)}</div>
-        </div>
+      <div class="top">
+        <span class="channel">${escapeHtml(o.channel)}</span>
+        <span class="stamp">印刷 ${escapeHtml(printedAt)}　${no}/${total}</span>
       </div>
+      <svg class="bc" data-code="${escapeHtml(o.orderId)}"></svg>
+      <div class="order-no">${escapeHtml(o.orderId)}</div>
       <div class="dest">${escapeHtml(o.customer)}</div>
       <table>
-        <thead><tr><th>商品名</th><th style="text-align:center;">数量</th></tr></thead>
+        <thead><tr class="cont"><th colspan="2">注文番号 ${escapeHtml(o.orderId)}（${escapeHtml(o.customer)}）</th></tr>
+          <tr><th>商品名</th><th style="text-align:center;">数量</th></tr></thead>
         <tbody>${o.items.map(it => `<tr><td>${escapeHtml(it.name)}</td><td class="qty">${it.qty}</td></tr>`).join("")}</tbody>
       </table>
-      <div class="pkg">梱包資材(目安): <b>${escapeHtml(pkg.name)}</b> <span style="font-size:9pt;">${escapeHtml(pkg.note || "")}</span></div>
-      <div class="foot"><span>出荷指示書（照合ツールのSTEP1でバーコードを読み取る）</span><span>注文日時 ${escapeHtml(o.orderedAt || "-")}</span></div>
+      <div class="pkg">梱包資材(目安): <b>${escapeHtml(pkg.name)}</b> <span class="note">${escapeHtml(pkg.note || "")}</span></div>
+      <div class="foot"><span>出荷指示書（照合ツールのSTEP1で読み取る）</span><span>注文日時 ${escapeHtml(o.orderedAt || "-")}</span></div>
     </div>`;
+}
+
+// CODE128。1モジュール=1単位で作り、CSSで枠の幅いっぱいに横へ伸ばす。
+// 左右の余白(クワイエットゾーン)は10モジュール。楽天の26文字の注文番号で約250モジュール → 1モジュール約0.38mm
+function renderBarcodes(root) {
+  root.querySelectorAll("svg.bc").forEach(svg => {
+    JsBarcode(svg, svg.dataset.code, { format: "CODE128", width: 1, height: 40, margin: 10, displayValue: false });
+    svg.removeAttribute("width");
+    svg.removeAttribute("height");
+    svg.removeAttribute("style");
+    svg.setAttribute("preserveAspectRatio", "none");
+    svg.setAttribute("shape-rendering", "crispEdges");
+  });
+}
+
+const MM = 96 / 25.4;               // CSSの1mm(px)
+const COLS = 2, ROWS = 3, CELL_H = 99;
+
+// 各指示書の中身の高さを1枠の幅で測り、使う枠の数を決める（文字を縮めずに収めるため）
+//   1 = 1枠 / 2 = 縦2枠 / 0 = 1ページ（縦2枠でも収まらない）
+function measureSpans(htmls) {
+  const box = document.createElement("div");
+  box.className = "measure";
+  box.innerHTML = htmls.join("");
+  document.body.appendChild(box);
+  renderBarcodes(box);
+  const spans = [...box.children].map(el => {
+    const h = el.getBoundingClientRect().height / MM;
+    return h <= CELL_H + 0.1 ? 1 : h <= CELL_H * 2 + 0.1 ? 2 : 0;
+  });
+  box.remove();
+  return spans;
+}
+
+// 指示書を枠に並べる（左上から右へ、次の段へ）。縦2枠の注文は同じ列の上下2枠を使う。
+// 今のページに入らなければ次のページへ。1ページを使う注文は単独のページにし、
+// 前のページの空き枠はその後の注文で続けて埋める（空き枠だらけのページを作らない）
+function layoutSheets(htmls, spans) {
+  const sheets = [];
+  let cur = null;
+  const fits = (grid, r, c, n) => r + n <= ROWS && [...Array(n).keys()].every(k => !grid[r + k][c]);
+  const findCell = (grid, n) => {
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (fits(grid, r, c, n)) return [r, c];
+    return null;
+  };
+  htmls.forEach((html, i) => {
+    const n = spans[i];
+    if (n === 0) { sheets.push(`<div class="sheet whole">${html}</div>`); return; }
+    let pos = cur && findCell(cur.grid, n);
+    if (!pos) {
+      cur = { grid: [...Array(ROWS)].map(() => Array(COLS).fill(false)), slips: [] };
+      sheets.push(cur);
+      pos = findCell(cur.grid, n);
+    }
+    const [r, c] = pos;
+    for (let k = 0; k < n; k++) cur.grid[r + k][c] = true;
+    const cut = (c < COLS - 1 ? " cut-r" : "") + (r + n < ROWS ? " cut-b" : "");
+    cur.slips.push(html.replace('<div class="slip">',
+      `<div class="slip${cut}" style="grid-column:${c + 1};grid-row:${r + 1} / span ${n};">`));
+  });
+  return sheets.map(s => typeof s === "string" ? s : `<div class="sheet">${s.slips.join("")}</div>`).join("");
 }
 
 document.getElementById("printBtn").addEventListener("click", async () => {
@@ -200,17 +278,11 @@ document.getElementById("printBtn").addEventListener("click", async () => {
   const d = new Date();
   const p2 = n => String(n).padStart(2, "0");
   const printedAt = `${d.getMonth() + 1}/${d.getDate()} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
-  let html = "";
-  for (let i = 0; i < list.length; i += 2) {
-    html += `<div class="sheet">${slipHtml(list[i], printedAt, i + 1, list.length)}`
-          + `${list[i + 1] ? slipHtml(list[i + 1], printedAt, i + 2, list.length) : ""}</div>`;
-  }
+  const htmls = list.map((o, i) => slipHtml(o, printedAt, i + 1, list.length));
+  if (document.fonts && document.fonts.ready) await document.fonts.ready;   // 文字の幅が確定してから高さを測る
   const area = document.getElementById("printArea");
-  area.innerHTML = html;
-  // CODE128。カメラで読みやすいよう、細すぎない線幅と左右の余白(クワイエットゾーン)を確保する
-  area.querySelectorAll("svg.bc").forEach(svg => {
-    JsBarcode(svg, svg.dataset.code, { format: "CODE128", width: 2, height: 70, margin: 14, displayValue: false });
-  });
+  area.innerHTML = layoutSheets(htmls, measureSpans(htmls));
+  renderBarcodes(area);
   window.print();
 
   // 印刷ダイアログでキャンセルされた場合を記録しないよう、印刷できたかを確認してから印刷日時を記録する
