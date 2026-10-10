@@ -9,6 +9,7 @@
  *     action=order     … 注文1件の最新状態（照合ツール STEP1。&id=注文番号）
  *     action=tracking  … 追跡番号が記録済みか（照合ツール STEP3。&no=追跡番号）
  *     action=workers   … 「担当者」シートの担当者名（照合ツールのホーム画面の担当者ボタン）
+ *     action=master    … 「商品マスタ」のSKU・JAN・商品名・セット構成・自社出荷(毛呂山)・棚番号（ピッキングリスト）
  *     action=test      … 動作確認用（「記録」シートにテスト行を追加）
  *
  * トークン: スクリプトプロパティ SECRET_TOKEN の値（コードには書かない）。未設定なら全リクエストを拒否する。
@@ -24,6 +25,12 @@ var LIST_COL_ORDERED = 8;   // H列
 var PRINT_LOG_SHEET_NAME = "印刷記録";
 // 担当者（A1=見出し、A2から下に1行1名。このスクリプトは読むだけ）
 var WORKERS_SHEET_NAME = "担当者";
+// 商品マスタ（このスクリプトは読むだけ）。A=モールSKU / B=JAN / C=商品名 / H=セット構成 は位置で読む（PC側の同期と同じ）。
+// 「自社出荷(毛呂山)」「棚番号」は見出し名で探す（列の追加・並べ替えで位置がずれても誤読しないため）
+var MASTER_SHEET_NAME = "商品マスタ";
+var MASTER_COL_SET = 8;   // H列
+var SELF_SHIP_HEADER = "自社出荷(毛呂山)";
+var SHELF_HEADER = "棚番号";
 var TZ = "Asia/Tokyo";
 // 「記録」シートの列。既存の7列の並びは変えず、末尾(H列)に「追跡番号」を追加する
 var WORK_LOG_HEADER = ["日時", "注文ID", "チャネル", "お届け先", "商品内訳", "推奨資材", "担当者", "追跡番号"];
@@ -47,6 +54,7 @@ function authorized_(token) {
  *   {WebアプリURL}?token=XXXX&action=order&id=398655-20261002-0081808899
  *   {WebアプリURL}?token=XXXX&action=tracking&no=123456789012
  *   {WebアプリURL}?token=XXXX&action=workers
+ *   {WebアプリURL}?token=XXXX&action=master
  */
 function doGet(e) {
   if (!authorized_(e.parameter.token)) {
@@ -69,6 +77,10 @@ function doGet(e) {
 
   if (action === "workers") {
     return jsonOutput(getWorkers_());
+  }
+
+  if (action === "master") {
+    return jsonOutput(getMaster_());
   }
 
   if (action === "test") {
@@ -288,6 +300,52 @@ function getWorkers_() {
     return { workers: [], note: "「" + WORKERS_SHEET_NAME + "」シートに名前がありません（A2から下に1行1名で入力）" };
   }
   return { workers: workers };
+}
+
+
+/**
+ * 「商品マスタ」→ { items: [{ sku, jan, name, set, self, shelf }], selfShipColumn: true/false, shelfColumn: true/false, notes: [...] }
+ *   jan: B列そのまま（カンマ区切りで複数のことがある） / set: H列「セット構成」 / shelf: 「棚番号」列（例 A-2-3）
+ *   self: 「自社出荷(毛呂山)」列のチェック true/false。列が無い・同じ見出しが複数ある場合は null（絞り込みしない）
+ */
+function getMaster_() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(MASTER_SHEET_NAME);
+  if (!sheet) {
+    return { items: [], selfShipColumn: false, shelfColumn: false, notes: ["「" + MASTER_SHEET_NAME + "」シートがありません"] };
+  }
+  var data = sheet.getDataRange().getValues();
+  var header = data.length ? data[0] : [];
+  var notes = [];
+  var findCol = function (name) {
+    var cols = [];
+    for (var j = 0; j < header.length; j++) if (normHeader_(header[j]) === normHeader_(name)) cols.push(j);
+    if (cols.length > 1) notes.push("商品マスタに「" + name + "」列が" + cols.length + "つあります（使いません）");
+    else if (!cols.length) notes.push("商品マスタに「" + name + "」列がありません");
+    return cols.length === 1 ? cols[0] : -1;
+  };
+  var selfCol = findCol(SELF_SHIP_HEADER);
+  var shelfCol = findCol(SHELF_HEADER);
+  var items = [];
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var sku = cellText_(row[0]).trim();
+    if (!sku) continue;
+    items.push({
+      sku: sku,
+      jan: cellText_(row[1]).trim(),
+      name: cellText_(row[2]).trim(),
+      set: cellText_(row[MASTER_COL_SET - 1]).trim(),
+      self: selfCol < 0 ? null : (row[selfCol] === true || String(row[selfCol]).trim().toUpperCase() === "TRUE"),
+      shelf: shelfCol < 0 ? "" : cellText_(row[shelfCol]).trim()
+    });
+  }
+  return { items: items, selfShipColumn: selfCol >= 0, shelfColumn: shelfCol >= 0, notes: notes };
+}
+
+
+/** 見出しの表記ゆれ（全角かっこ・全角英数・空白）を吸収する（PC側の同期の _norm_header と同じ） */
+function normHeader_(v) {
+  return cellText_(v).normalize("NFKC").replace(/\s+/g, "");
 }
 
 

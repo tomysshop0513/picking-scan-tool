@@ -65,6 +65,12 @@ const sheets = {
     ["TEST-0002", "Yahoo", "鈴木 様 / 大阪府", items("テスト商品B", "4562403100153", 2), "未処理", "2026-10-04 09:00", "", "2026-10-03 11:00"],
   ]),
 };
+// 試験用データ: MOCK_FIXTURE=JSONファイル（{ "シート名": [[見出し…], [値…], …] }）で、シートを差し替え・追加する
+//   例: ピッキングリストの確認用に「本日出荷リスト」「商品マスタ」を入れる
+if (process.env.MOCK_FIXTURE) {
+  const fixture = JSON.parse(fs.readFileSync(process.env.MOCK_FIXTURE, "utf8"));
+  for (const [name, rows] of Object.entries(fixture)) sheets[name] = new FakeSheet(rows);
+}
 function applyScenario(name) {
   scenario = name;
   const rows = SCENARIOS[name].rows;
