@@ -114,6 +114,9 @@
   .pick .warn-list div{margin-top:0.8mm;font-family:Consolas,"Yu Gothic",monospace;}
   .toolbar label{font-size:14px;display:flex;align-items:center;gap:4px;}
   tr.printed td{color:#8a9a95;}
+  .loaded{font-size:13px;color:#5a6b66;margin:-4px 0 10px;}
+  .loaded b{color:var(--ink);}
+  .loaded.stale{color:#8a5a00;font-weight:700;}
 </style>
 </head>
 <body>
@@ -133,6 +136,7 @@
     <button class="btn-sub" id="changeKeyBtn">接続キーを変更</button>
     <span class="count" id="count"></span>
   </div>
+  <div class="loaded" id="loadedAt"></div>
   <div class="msg" id="msg"></div>
   <table class="list">
     <thead><tr><th></th><th>注文日時</th><th>注文番号</th><th>チャネル</th><th>お届け先</th><th>商品（セットは単品に展開済み）</th><th>梱包資材(目安)</th><th>印刷日時</th><th>警告</th></tr></thead>
@@ -150,21 +154,49 @@ const { apiGet, apiPost, estimatePackage, escapeHtml } = window.Common;
 let allPending = [];   // 未処理の注文（注文日時の古い順）
 let shown = [];        // 表示中の注文
 
-async function load() {
+// 一覧を読み込んでからこの時間がたっていたら、「選択した注文を印刷」で印刷の前に自動で読み直す
+const STALE_MS = 5 * 60 * 1000;
+let loadedAt = null;   // 一覧を読み込んだ時刻（Date）
+let syncedAt = "";     // 本日出荷リストの取得日時（F列。PC側の同期が書いた時刻）の最新
+
+/** 一覧を読み込む。keepIds（注文IDのSet）を渡すと、その注文の選択を保つ。成功したら true */
+async function load(keepIds) {
   const msg = document.getElementById("msg");
   msg.textContent = "読み込み中…";
+  let orders;
   try {
-    allPending = ((await apiGet("list")).orders || []).filter(o => o.status === "未処理");
+    orders = (await apiGet("list")).orders || [];
   } catch (e) {
     msg.textContent = e.message;
-    return;
+    return false;
   }
+  allPending = orders.filter(o => o.status === "未処理");
+  loadedAt = new Date();
+  syncedAt = orders.reduce((m, o) => (o.fetchedAt > m ? o.fetchedAt : m), "");
   // 注文日時の古い順（注文日時が無いものは最後、同じなら注文番号順）
   allPending.sort((a, b) => (a.orderedAt || "9999").localeCompare(b.orderedAt || "9999") || a.orderId.localeCompare(b.orderId));
-  render();
+  render(keepIds);
+  renderLoadedAt();
+  return true;
 }
 
-function render() {
+/** 「一覧の読み込み 10/11 14:05:12（3分前）・本日出荷リストの同期 10/11 14:00」。5分を過ぎたら色を変える */
+function renderLoadedAt() {
+  const el = document.getElementById("loadedAt");
+  if (!loadedAt) { el.textContent = ""; return; }
+  const p2 = n => String(n).padStart(2, "0");
+  const t = `${loadedAt.getMonth() + 1}/${loadedAt.getDate()} ${p2(loadedAt.getHours())}:${p2(loadedAt.getMinutes())}:${p2(loadedAt.getSeconds())}`;
+  const age = Date.now() - loadedAt.getTime();
+  const min = Math.floor(age / 60000);
+  const stale = age > STALE_MS;
+  el.className = "loaded" + (stale ? " stale" : "");
+  el.innerHTML = `一覧の読み込み <b>${t}</b>（${min ? min + "分前" : "1分以内"}）`
+    + (syncedAt ? `・本日出荷リストの同期 ${escapeHtml(syncedAt.slice(5).replace("-", "/"))}` : "")
+    + (stale ? `　※ ${STALE_MS / 60000}分以上たっています。印刷するときに自動で最新にします` : "");
+}
+setInterval(renderLoadedAt, 30000);
+
+function render(keepIds) {
   const showPrinted = document.getElementById("showPrinted").checked;
   shown = allPending.filter(o => showPrinted || !o.printedAt);
   const msg = document.getElementById("msg");
@@ -176,7 +208,8 @@ function render() {
     const tr = document.createElement("tr");
     tr.className = o.warning ? "warn" : (o.printedAt ? "printed" : "");
     // 未印刷で警告の無い注文は最初から選択済み（印刷済みは再印刷になるので選択しない）
-    const checked = !o.warning && !o.printedAt;
+    // 読み直したときは、それまでの選択を保つ（警告が付いた注文は選択できない）
+    const checked = !o.warning && (keepIds ? keepIds.has(o.orderId) : !o.printedAt);
     tr.innerHTML = `
       <td><input type="checkbox" data-i="${i}" ${o.warning ? "disabled" : ""} ${checked ? "checked" : ""}></td>
       <td>${escapeHtml(o.orderedAt)}</td>
@@ -202,7 +235,7 @@ function updateCount() {
 }
 document.getElementById("rows").addEventListener("change", updateCount);
 document.getElementById("showPrinted").addEventListener("change", render);
-document.getElementById("reloadBtn").addEventListener("click", load);
+document.getElementById("reloadBtn").addEventListener("click", () => load());
 document.getElementById("allBtn").addEventListener("click", () => {
   document.querySelectorAll("#rows input:not(:disabled)").forEach(c => c.checked = true); updateCount();
 });
@@ -306,9 +339,39 @@ function layoutSheets(htmls, spans) {
 }
 
 document.getElementById("printBtn").addEventListener("click", async () => {
-  const list = selected();
+  let list = selected();
   const msg = document.getElementById("msg");
   if (!list.length) { alert("印刷する注文を選択してください"); return; }
+  if (!loadedAt || Date.now() - loadedAt.getTime() > STALE_MS) {
+    // 一覧が古い → 印刷の前に読み直し、選んだ注文が変わっていないか確かめる
+    const before = new Map(list.map(o => [o.orderId, o]));
+    if (!(await load(new Set(before.keys())))) {
+      alert("一覧を最新にできなかったため、印刷を中止しました。\n「一覧を更新」を押してから、もう一度印刷してください。");
+      return;
+    }
+    const now = new Map(allPending.map(o => [o.orderId, o]));
+    const changes = [];
+    before.forEach((o, id) => {
+      const n = now.get(id);
+      if (!n) changes.push(`${id}：未処理ではなくなりました（梱包済み・対象外など）`);
+      else if (n.warning && n.warning !== o.warning) changes.push(`${id}：警告が付きました（${n.warning}）`);
+      else if (n.printedAt && n.printedAt !== o.printedAt) changes.push(`${id}：ほかの端末で印刷されました（${n.printedAt}）`);
+      else if (JSON.stringify(n.items) !== JSON.stringify(o.items)) changes.push(`${id}：商品の内容が変わりました`);
+    });
+    if (changes.length) {
+      msg.textContent = "一覧を最新にしました。選んでいた注文に変更があったため、印刷していません。";
+      alert(`一覧を最新にしたところ、選んでいた注文に変更がありました。印刷は中止しました。\n\n${changes.slice(0, 8).join("\n")}`
+        + `${changes.length > 8 ? `\nほか ${changes.length - 8}件` : ""}\n\n一覧を確認してから、もう一度「選択した注文を印刷」を押してください。`);
+      return;
+    }
+    const added = allPending.filter(o => !o.warning && !o.printedAt && !before.has(o.orderId));
+    if (added.length && !confirm(`一覧を最新にしたところ、まだ印刷していない注文が ${added.length}件 増えています（選択していません）。\n`
+        + `選んだ ${before.size}件だけ印刷しますか？\n（キャンセルで印刷をやめ、一覧を確認できます）`)) {
+      msg.textContent = `一覧を最新にしました。新しい注文が ${added.length}件 あります。`;
+      return;
+    }
+    list = selected();
+  }
   const reprint = list.filter(o => o.printedAt);
   if (reprint.length && !confirm(`再印刷です。\n選択した ${list.length}件のうち ${reprint.length}件は印刷済みです`
       + `（${reprint.map(o => o.orderId).slice(0, 3).join("、")}${reprint.length > 3 ? " ほか" : ""}）。\n印刷しますか？`)) return;
