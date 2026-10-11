@@ -109,9 +109,11 @@
     aspect-ratio:16/7;
     display:flex;align-items:center;justify-content:center;
   }
-  .scan-box video{width:100%;height:100%;object-fit:cover;transform-origin:50% 50%;}   /* デジタルズーム時は scale(2) で中央を拡大（枠は16:7のまま） */
+  .scan-box video{width:100%;height:100%;object-fit:cover;transform-origin:50% 50%;pointer-events:none;}   /* デジタルズーム時は scale(2) で中央を拡大（枠は16:7のまま） */
+  /* iPhone(WebKit)では再生中の動画(特に拡大表示中)が別の層で描かれ、上に重ねたボタンのタップを奪うことがある。
+     動画はタップを受けない(pointer-events:none)・ズーム切替は独立した層(translateZ)で動画より手前に出す */
   .zoom-toggle{
-    position:absolute;top:8px;right:8px;z-index:2;
+    position:absolute;top:8px;right:8px;z-index:5;transform:translateZ(0);-webkit-transform:translateZ(0);
     display:flex;align-items:center;gap:2px;
     background:rgba(0,0,0,.55);border-radius:999px;padding:3px 4px 3px 10px;
     color:#fff;font-size:12px;font-weight:700;
@@ -119,7 +121,7 @@
   .zoom-toggle span{margin-right:4px;}
   .zoom-toggle button{
     background:transparent;color:#fff;border:none;border-radius:999px;
-    padding:6px 10px;font-size:13px;font-weight:800;
+    min-width:44px;min-height:36px;padding:6px 10px;font-size:14px;font-weight:800;touch-action:manipulation;
   }
   .zoom-toggle button.on{background:#fff;color:var(--brand-dark);}
   .scan-frame{display:none;}
