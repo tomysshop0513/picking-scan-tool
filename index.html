@@ -114,16 +114,16 @@
      動画はタップを受けない(pointer-events:none)・ズーム切替は独立した層(translateZ)で動画より手前に出す */
   .zoom-toggle{
     position:absolute;top:8px;right:8px;z-index:5;transform:translateZ(0);-webkit-transform:translateZ(0);
-    display:flex;align-items:center;gap:2px;
-    background:rgba(0,0,0,.55);border-radius:999px;padding:3px 4px 3px 10px;
-    color:#fff;font-size:12px;font-weight:700;
+    display:flex;gap:6px;
   }
-  .zoom-toggle span{margin-right:4px;}
+  /* 1つずつ独立したボタンの形（枠・影つき）。選択中は塗りつぶし */
   .zoom-toggle button{
-    background:transparent;color:#fff;border:none;border-radius:999px;
-    min-width:44px;min-height:36px;padding:6px 10px;font-size:14px;font-weight:800;touch-action:manipulation;
+    background:rgba(0,0,0,.6);color:#fff;border:2px solid #fff;border-radius:10px;
+    box-shadow:0 2px 6px rgba(0,0,0,.35);
+    min-width:52px;min-height:40px;padding:6px 10px;font-size:16px;font-weight:800;touch-action:manipulation;
   }
   .zoom-toggle button.on{background:#fff;color:var(--brand-dark);}
+  .zoom-toggle button:active{transform:scale(.94);}
   .scan-frame{display:none;}
   .scan-status{
     text-align:center;color:var(--ink);font-size:13px;
@@ -700,7 +700,7 @@ async function applyZoom(cam) {
   cam.video.style.transform = cam.crop === 2 ? "scale(2)" : "";
 }
 
-// 各カメラ枠の右上に「ズーム 1x/2x」切替を付ける。押すと記憶し、起動中のカメラにすぐ反映する
+// 各カメラ枠の右上に「1x」「2x」のズーム切替ボタンを付ける。押すと記憶し、起動中のカメラにすぐ反映する
 function renderZoomToggles() {
   const z = getZoomPref();
   document.querySelectorAll(".zoom-toggle button").forEach(b => b.classList.toggle("on", Number(b.dataset.zoom) === z));
@@ -708,7 +708,7 @@ function renderZoomToggles() {
 document.querySelectorAll(".scan-box").forEach(box => {
   const t = document.createElement("div");
   t.className = "zoom-toggle";
-  t.innerHTML = `<span>ズーム</span><button type="button" data-zoom="1">1x</button><button type="button" data-zoom="2">2x</button>`;
+  t.innerHTML = `<button type="button" data-zoom="1" aria-label="ズーム 1x">1x</button><button type="button" data-zoom="2" aria-label="ズーム 2x">2x</button>`;
   t.addEventListener("click", (ev) => {
     const b = ev.target.closest("button");
     if (!b) return;
