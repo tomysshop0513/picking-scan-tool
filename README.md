@@ -12,7 +12,7 @@
 | `common.js` | 共通処理（接続キー・Apps Scriptの呼び出し・梱包資材の判定） |
 | `gas/Code.gs` | Apps Script（作業記録スプレッドシートに紐づくスクリプト）のコード。更新手順は `gas/DEPLOY.md` |
 | `images/` | 商品画像（照合ツールのSTEP2で表示。ファイル名は「先頭のJAN.jpg」） |
-| `tools/resize_images.py` | 商品画像を表示用（長い辺600px・JPEG）に縮小して `images/` に置くスクリプト |
+| `tools/resize_images.py` | 商品画像を表示用（白い余白を切り落とし、長い辺600px・JPEG）に縮小して `images/` に置くスクリプト |
 | `dev/mock-gas-server.mjs` | 試験用サーバー（本物の Code.gs を偽のシートで動かす。本番には接続しない） |
 
 ## 接続キー
