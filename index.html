@@ -125,6 +125,16 @@
   .zoom-toggle button.on{background:#fff;color:var(--brand-dark);}
   .zoom-toggle button:active{transform:scale(.94);}
   .scan-frame{display:none;}
+  /* STEP1: 注文の状態を確認している間は、カメラ映像の代わりに大きな赤字のメッセージを同じ位置に出す
+     （枠の大きさは変えない。映像とズーム切替は見えなくするだけで、カメラは止めない） */
+  .checking-msg{
+    display:none;position:absolute;inset:0;z-index:6;
+    background:#fff;border:3px solid #d32f2f;border-radius:18px;
+    align-items:center;justify-content:center;text-align:center;padding:8px 12px;
+    color:#d32f2f;font-size:2rem;font-weight:900;line-height:1.3;
+  }
+  .scan-box.checking .checking-msg{display:flex;}
+  .scan-box.checking video,.scan-box.checking .zoom-toggle{visibility:hidden;}
   .scan-status{
     text-align:center;color:var(--ink);font-size:13px;
     margin-top:8px;
@@ -370,6 +380,7 @@
         <div class="scan-frame"></div>
         <div class="flash-ok" id="flashOkOrder">OK</div>
         <div class="flash-ng" id="flashNgOrder">NG</div>
+        <div class="checking-msg" role="status" aria-live="assertive">注文の状態を<br>確認しています…</div>
       </div>
       <div class="scan-status" id="scanStatusOrder">カメラを起動しています…</div>
       <div class="busy" id="busyOrder"></div>
@@ -515,6 +526,7 @@ function showScreen(name, title, showBack) {
     orderScanLock = false; orderPauseUntil = 0;
     document.getElementById("orderBanner").innerHTML = "";
     document.getElementById("busyOrder").textContent = "";
+    setOrderChecking(false);
     startCamera("videoOrder", "scanStatusOrder", handleOrderCode);
   }
   if (name === "picking") startCamera("videoItem", "scanStatusItem", handleItemCode);
@@ -916,23 +928,29 @@ document.getElementById("manualOrderBtn").addEventListener("click", () => {
   document.getElementById("manualOrder").value = "";
 });
 
+// 確認中: カメラ映像の位置に「注文の状態を確認しています…」（大きな赤字）。カメラは止めずに見えなくするだけ
+const ORDER_CHECK_TIMEOUT_MS = 20000;   // これ以上応答が無ければ通信エラーにして、カメラ映像に戻す
+function setOrderChecking(on) {
+  document.getElementById("scanBoxOrder").classList.toggle("checking", on);
+}
+
 async function handleOrderCode(code) {
   code = String(code).trim();
   if (orderScanLock || Date.now() < orderPauseUntil) return;
   orderScanLock = true;
-  const busy = document.getElementById("busyOrder");
-  busy.textContent = "注文の状態を確認しています…";
+  setOrderChecking(true);
   let res;
   try {
     // 30分ごとの同期の間にキャンセル・梱包済みになった注文を止めるため、読み取った時点の状態を取り直す
-    res = await apiGet("order", { id: code });
+    res = await apiGet("order", { id: code }, { timeoutMs: ORDER_CHECK_TIMEOUT_MS });
   } catch (e) {
-    busy.textContent = "";
     orderPauseUntil = ngPause("Order", "scanStatusOrder", "orderBanner", `<div class="msg-banner ng">${escapeHtml(e.message)}</div>`);
     orderScanLock = false;
     return;
+  } finally {
+    // 成功・エラーのどちらでも、確認中の表示を消してカメラ映像に戻す（NG/OK の表示はこのあと映像の上に出る）
+    setOrderChecking(false);
   }
-  busy.textContent = "";
   orderScanLock = false;
   if (!res.found) {
     orderPauseUntil = ngPause("Order", "scanStatusOrder", "orderBanner",

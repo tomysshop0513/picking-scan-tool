@@ -76,15 +76,26 @@
   }
 
   /** GET: action=list / order / tracking */
-  async function apiGet(action, params = {}) {
+  /** timeoutMs を渡すと、その時間で打ち切って通信エラー（timeout）にする（電波が弱くて応答が返らないとき用） */
+  async function apiGet(action, params = {}, { timeoutMs } = {}) {
     const q = new URLSearchParams({ token: readKey(), action, ...params });
-    let res;
+    const ctrl = timeoutMs ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
+    let res, data;
     try {
-      res = await fetch(`${C.GAS_URL}?${q}`, { cache: "no-store" });
+      res = await fetch(`${C.GAS_URL}?${q}`, { cache: "no-store", signal: ctrl ? ctrl.signal : undefined });
+      data = await res.json().catch(e => {
+        if (e && e.name === "AbortError") throw e;
+        return { error: "bad_response" };
+      });
     } catch (e) {
+      if (e && e.name === "AbortError") {
+        throw new ApiError("timeout", "応答がありません（時間切れ）。電波の状態を確認して、もう一度スキャンしてください。");
+      }
       throw new ApiError("network", "通信できませんでした。電波の状態を確認して、もう一度スキャンしてください。");
+    } finally {
+      clearTimeout(timer);
     }
-    const data = await res.json().catch(() => ({ error: "bad_response" }));
     if (data.error === "unauthorized") {
       clearKey();
       throw new ApiError("unauthorized", "接続キーが正しくありません。画面を読み込み直して、接続キーを入れ直してください。");
