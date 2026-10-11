@@ -101,7 +101,7 @@ applyScenario(scenario);
 
 // ---------- HTTP ----------
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const TYPES = { ".html": "text/html; charset=utf-8", ".js": "application/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".png": "image/png" };
+const TYPES = { ".html": "text/html; charset=utf-8", ".js": "application/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".png": "image/png", ".jpg": "image/jpeg" };
 function controlPage() {
   const links = Object.entries(SCENARIOS).map(([k, s]) =>
     `<li><a href="/__mock/set?scenario=${k}">${k === scenario ? "<b>▶ " + esc(s.label) + "（選択中）</b>" : esc(s.label)}</a></li>`).join("");

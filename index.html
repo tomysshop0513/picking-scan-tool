@@ -151,21 +151,54 @@
   .order-title{font-size:20px;font-weight:800;margin:0 0 2px;}
   .order-sub{font-size:13px;color:#5a6b66;margin-bottom:16px;}
 
-  /* Picking list */
-  .item-row{
-    border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:10px;
-    display:flex;justify-content:space-between;align-items:center;background:#fff;
+  /* Picking list: 1商品 = 1枚のカード（左に商品画像、右に商品名と スキャン済み/必要数）。未完了のカードを上に並べる */
+  .pick-card{
+    border:2px solid var(--ink);border-radius:14px;padding:8px;margin-bottom:10px;
+    display:flex;gap:10px;background:#fff;
   }
-  .item-row.done{background:var(--ok-bg);border-color:#bfe4cc;}
-  .item-name{font-size:15px;font-weight:700;}
-  .item-jan{font-size:12px;color:#5a6b66;margin-top:2px;font-family:monospace;}
-  .item-qty{font-size:15px;font-weight:800;color:var(--ink);}
-  .item-qty.complete{color:var(--ok);}
-  .check{
-    width:26px;height:26px;border-radius:50%;border:2px solid var(--line);
-    display:flex;align-items:center;justify-content:center;font-size:14px;color:#fff;margin-left:10px;flex-shrink:0;
+  .pick-img{
+    position:relative;flex:0 0 40%;aspect-ratio:1/1;border-radius:8px;overflow:hidden;
+    background:#e3e7e5;color:#7a8a85;font-size:15px;font-weight:700;
+    display:flex;align-items:center;justify-content:center;
   }
-  .check.on{background:var(--ok);border-color:var(--ok);}
+  /* 読み込めるまでは下の「画像なし」が見えている（読めなかった画像は消すので、壊れた画像の印は出ない） */
+  .pick-img img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#fff;opacity:0;}
+  .pick-img img.loaded{opacity:1;}
+  .pick-info{flex:1;min-width:0;display:flex;flex-direction:column;}
+  .pick-name{font-size:17px;font-weight:700;line-height:1.35;word-break:break-all;}
+  .pick-jan{font-size:11px;color:#5a6b66;margin-top:2px;font-family:monospace;word-break:break-all;}
+  /* スキャン済み / 必要数（画面幅の約1/3） */
+  .pick-qty{
+    margin:auto 0;padding:6px 0;text-align:center;white-space:nowrap;
+    font-size:clamp(34px,11vw,60px);font-weight:800;line-height:1.1;font-variant-numeric:tabular-nums;
+  }
+  .pick-qty .need{font-size:.8em;color:#5a6b66;}
+  .pick-ok{display:none;}
+  .pick-card.done{border-color:var(--ok);border-width:3px;background:var(--ok-bg);}
+  .pick-card.done .pick-qty{color:var(--ok);}
+  .pick-card.done .pick-ok{
+    display:block;align-self:center;background:var(--ok);color:#fff;border-radius:999px;
+    padding:4px 18px;font-size:18px;font-weight:900;letter-spacing:.06em;
+  }
+
+  /* ピッキング完了（画面全体）。OK を押すまで次へ進まない */
+  .pick-done{
+    display:none;position:fixed;inset:0;z-index:50;background:rgba(10,77,64,.97);
+    align-items:center;justify-content:center;padding:24px;
+  }
+  .pick-done.show{display:flex;}
+  .pick-done-box{text-align:center;color:#fff;width:100%;max-width:420px;}
+  .pick-done-box .circle{
+    width:110px;height:110px;border-radius:50%;background:#fff;color:var(--ok);
+    display:flex;align-items:center;justify-content:center;margin:0 auto 18px;font-size:64px;font-weight:900;
+  }
+  .pick-done-box .big{font-size:clamp(34px,11vw,52px);font-weight:900;line-height:1.3;}
+  .pick-done-box .sub{font-size:16px;margin-top:10px;opacity:.9;word-break:break-all;}
+  .pick-done-box button{
+    width:100%;margin-top:30px;background:#fff;color:var(--brand-dark);border:none;border-radius:16px;
+    padding:20px;font-size:24px;font-weight:900;
+  }
+  .pick-done-box button:active{transform:scale(.97);}
 
   .msg-banner{
     border-radius:12px;padding:12px 14px;font-size:14px;font-weight:700;margin-bottom:14px;
@@ -189,14 +222,15 @@
     background:#fff;
     z-index:20;
     margin:0 -20px;
-    padding:0 20px 14px;
+    padding:8px 20px 10px;
     box-shadow:0 10px 12px -10px rgba(0,0,0,0.12);
   }
   .picking-list-label{
     font-size:13px;font-weight:700;color:#5a6b66;
-    margin:16px 0 8px;letter-spacing:.03em;
+    margin:12px 0 8px;letter-spacing:.03em;
   }
-  #screen-picking #itemList{padding-bottom:70px;}
+  #screen-picking .msg-banner{margin:8px 0 0;}
+  #screen-picking .manual-entry{margin-bottom:70px;}
 
   .scroll-hint{
     position:fixed;
@@ -358,11 +392,12 @@
 
     <!-- STEP2: 商品照合 -->
     <section class="screen" id="screen-picking">
-      <div class="picking-sticky-top">
-        <div class="step-label">STEP 2 / 商品をスキャン</div>
-        <div class="order-title" id="pickOrderTitle"></div>
-        <div class="order-sub" id="pickOrderSub"></div>
+      <div class="step-label">STEP 2 / 商品をスキャン</div>
+      <div class="order-title" id="pickOrderTitle"></div>
+      <div class="order-sub" id="pickOrderSub"></div>
 
+      <!-- スマホの画面に商品カードが収まるよう、上部に固定するのはカメラ・状態表示・メッセージだけ -->
+      <div class="picking-sticky-top">
         <div class="scan-box">
           <video id="videoItem" playsinline muted></video>
           <div class="scan-frame"></div>
@@ -370,21 +405,27 @@
           <div class="flash-ng" id="flashNgItem">NG</div>
         </div>
         <div class="scan-status" id="scanStatusItem">カメラを起動しています…</div>
-        <div class="manual-entry">
-          <input type="text" id="manualItem" placeholder="読み取れない場合はJANコードを入力">
-          <button id="manualItemBtn">照合</button>
-        </div>
-
         <div id="pickBanner"></div>
       </div>
 
       <div class="picking-list-label">ピッキングリスト</div>
       <div id="itemList"></div>
+      <div class="manual-entry">
+        <input type="text" id="manualItem" placeholder="読み取れない場合はJANコードを入力">
+        <button id="manualItemBtn">照合</button>
+      </div>
     </section>
 
-    <!-- STEP3: 宛名確認と発送ラベル -->
+    <!-- STEP3: 推奨資材・宛名確認と発送ラベル -->
     <section class="screen" id="screen-label">
       <div class="step-label">STEP 3 / 発送ラベルをスキャン</div>
+      <div class="package-banner" id="labelPackage">
+        <div>
+          <div class="label">推奨梱包資材(目安)</div>
+          <div class="value" id="labelPackageValue">-</div>
+          <div class="note" id="labelPackageNote"></div>
+        </div>
+      </div>
       <div class="dest-big" id="destBig"></div>
       <div class="dest-guide">ラベルの宛名と同じなら、ラベルのバーコードをスキャンしてください</div>
       <div class="scan-box">
@@ -426,6 +467,15 @@
   <p class="footer-note">本日出荷リスト（30分ごとに更新）をもとに動作します。注文の状態はスキャンした時点の最新を確認しています。</p>
 </div>
 
+<div class="pick-done" id="pickDone" role="dialog" aria-modal="true" aria-labelledby="pickDoneTitle">
+  <div class="pick-done-box">
+    <div class="circle">✓</div>
+    <div class="big" id="pickDoneTitle">ピッキング完了</div>
+    <div class="sub" id="pickDoneSub"></div>
+    <button id="pickDoneOk">OK</button>
+  </div>
+</div>
+
 <div class="scroll-hint" id="scrollHint"><span class="arrow">▼</span> スクロールして続きを見る</div>
 
 <script src="config.js"></script>
@@ -457,6 +507,7 @@ function showScreen(name, title, showBack) {
   screens[name].classList.add("active");
   headerTitle.textContent = title;
   backBtn.style.display = showBack ? "inline-block" : "none";
+  document.getElementById("pickDone").classList.remove("show");
   stopAllCameras();
   window.scrollTo(0, 0);
   updateScrollHint();
@@ -933,24 +984,42 @@ function renderPicking() {
   renderItemList();
 }
 
+/** 商品画像: images/先頭のJAN.jpg（ファイル名に使えない文字を含むJANは画像なし扱い） */
+const noImage = new Set();   // 読み込めなかった画像（スキャンのたびに描き直しても、もう一度は読みに行かない）
+function itemImageUrl(it) {
+  const jan = jansOf(it)[0] || "";
+  return /^[0-9A-Za-z_-]+$/.test(jan) ? `images/${jan}.jpg` : "";
+}
+
 function renderItemList() {
   const wrap = document.getElementById("itemList");
   wrap.innerHTML = "";
-  currentOrder.items.forEach((it, i) => {
+  // 未完了のカードを上に（同じ状態どうしは注文の明細の順）
+  const order = currentOrder.items.map((it, i) => i);
+  order.sort((a, b) => (pickedCount[a] >= currentOrder.items[a].qty) - (pickedCount[b] >= currentOrder.items[b].qty) || a - b);
+  order.forEach(i => {
+    const it = currentOrder.items[i];
     const got = pickedCount[i];
     const complete = got >= it.qty;
-    const row = document.createElement("div");
-    row.className = "item-row" + (complete ? " done" : "");
-    row.innerHTML = `
-      <div>
-        <div class="item-name">${escapeHtml(it.name)}</div>
-        <div class="item-jan">JAN: ${jansOf(it).map(escapeHtml).join(" / ")}</div>
-      </div>
-      <div style="display:flex;align-items:center;">
-        <div class="item-qty ${complete ? "complete" : ""}">${got} / ${it.qty}</div>
-        <div class="check ${complete ? "on" : ""}">${complete ? "✓" : ""}</div>
+    const src = itemImageUrl(it);
+    const card = document.createElement("div");
+    card.className = "pick-card" + (complete ? " done" : "");
+    card.innerHTML = `
+      <div class="pick-img">画像なし${src && !noImage.has(src) ? `<img alt="" src="${escapeHtml(src)}">` : ""}</div>
+      <div class="pick-info">
+        <div class="pick-name">${escapeHtml(it.name)}</div>
+        <div class="pick-jan">JAN: ${jansOf(it).map(escapeHtml).join(" / ")}</div>
+        <div class="pick-qty">${got} <span class="need">/ ${it.qty}</span></div>
+        <div class="pick-ok">OK</div>
       </div>`;
-    wrap.appendChild(row);
+    const img = card.querySelector("img");
+    if (img) {
+      const shown = () => img.classList.add("loaded");
+      if (img.complete && img.naturalWidth) shown();
+      img.addEventListener("load", shown);
+      img.addEventListener("error", () => { noImage.add(src); img.remove(); });
+    }
+    wrap.appendChild(card);
   });
   updateScrollHint();
 }
@@ -997,13 +1066,29 @@ function handleItemCode(code) {
     setTimeout(() => { itemScanLock = false; status.textContent = "バーコードを枠内に合わせてください"; }, 2500);
     return;
   }
+  // すべてそろった → 画面全体に「ピッキング完了」。OK を押すまで次（推奨資材・ラベル）へは進まない
+  status.textContent = "すべての商品がそろいました";
   setTimeout(() => {
-    document.getElementById("destBig").textContent = currentOrder.customer;
-    document.getElementById("labelBanner").innerHTML = "";
-    document.getElementById("busyLabel").textContent = "";
-    showScreen("label", "発送ラベルを確認", true);
+    if (!screens.picking.classList.contains("active")) return;
+    stopAllCameras();
+    const total = currentOrder.items.reduce((s, it) => s + it.qty, 0);
+    document.getElementById("pickDoneSub").textContent = `${currentOrder.orderId}（${currentOrder.items.length}品目・${total}点）`;
+    document.getElementById("pickDone").classList.add("show");
+    document.getElementById("pickDoneOk").focus();
   }, 600);
 }
+
+document.getElementById("pickDoneOk").addEventListener("click", () => {
+  if (!currentOrder) return;
+  const pkg = estimatePackage(currentOrder.items);
+  document.getElementById("labelPackage").classList.toggle("warn", pkg.name === "要手動確認");
+  document.getElementById("labelPackageValue").textContent = pkg.name;
+  document.getElementById("labelPackageNote").textContent = pkg.note || "";
+  document.getElementById("destBig").textContent = currentOrder.customer;
+  document.getElementById("labelBanner").innerHTML = "";
+  document.getElementById("busyLabel").textContent = "";
+  showScreen("label", "発送ラベルを確認", true);
+});
 
 /* ---------- STEP3: 宛名確認 → 発送ラベルの追跡番号 → 作業記録 ---------- */
 let labelScanLock = false;
