@@ -1,6 +1,6 @@
 /* 照合ツール(index.html)・出荷指示書(print.html) 共通処理 */
 // 版の番号（tools/bump_version.py が書き換える。照合ツールは index.html と同じ番号かを起動時に確かめる）
-(window.APP_FILE_VERSIONS = window.APP_FILE_VERSIONS || {})["common.js"] = "2026-10-12.2";
+(window.APP_FILE_VERSIONS = window.APP_FILE_VERSIONS || {})["common.js"] = "2026-10-12.3";
 (function () {
   const C = window.APP_CONFIG;
   const KEY_STORAGE = "pickingToolKey";
@@ -136,10 +136,23 @@
     return new RegExp(C.TRACKING.pattern).test(no);
   }
 
-  /** 梱包資材の自動判定(目安)。寸法(w/d/h)が無い商品があれば判定しない */
+  /** 梱包資材の自動判定(目安)
+   *  1. 全商品に mailMax（商品マスタ「メール便上限数」）があれば、各商品の 数量÷上限 の合計が1以下ならメール便。
+   *     1を超えたらメール便にはしない（寸法の厚み判定もしない）で箱を判定する
+   *  2. 1つでも mailMax が無ければ、今までどおり寸法(w/d/h)で判定する。寸法が無い商品があれば判定しない */
   function estimatePackage(items) {
-    if (!items.length || items.some(it => !(it.w > 0 && it.d > 0 && it.h > 0))) {
-      return { name: "要手動確認", note: "寸法が未登録の商品があります（商品マスタD〜F列）" };
+    if (!items.length) return { name: "要手動確認", note: "商品がありません" };
+    const allMailMax = items.every(it => Number.isInteger(it.mailMax) && it.mailMax > 0);
+    if (allMailMax) {
+      const ratio = items.reduce((s, it) => s + it.qty / it.mailMax, 0);
+      const detail = items.map(it => `${it.qty}/${it.mailMax}`).join("＋");
+      if (ratio <= 1 + 1e-9) {
+        return { name: C.MAIL_NAME, note: `メール便上限数で判定（数量/上限 ${detail}${items.length > 1 ? ` ＝ ${ratio.toFixed(2)}` : ""}）` };
+      }
+    }
+    if (items.some(it => !(it.w > 0 && it.d > 0 && it.h > 0))) {
+      return { name: "要手動確認", note: allMailMax ? "メール便上限数を超えています。寸法が未登録の商品があります（商品マスタD〜F列）"
+                                                   : "寸法が未登録の商品があります（商品マスタD〜F列）" };
     }
     let totalVolume = 0;
     let totalThickness = 0;
@@ -151,8 +164,8 @@
       const frame = [C.MAIL_FOOTPRINT.w, C.MAIL_FOOTPRINT.d].sort((a, b) => b - a);
       if (!(sides[0] <= frame[0] && sides[1] <= frame[1])) fitsMailFootprint = false;
     });
-    if (fitsMailFootprint && totalThickness <= C.MAIL_FOOTPRINT.maxThickness) {
-      return { name: "メール便(ゆうパケット)", note: `厚み合計 目安 ${totalThickness.toFixed(1)}cm` };
+    if (!allMailMax && fitsMailFootprint && totalThickness <= C.MAIL_FOOTPRINT.maxThickness + 1e-9) {
+      return { name: C.MAIL_NAME, note: `厚み合計 目安 ${totalThickness.toFixed(1)}cm` };
     }
     for (const box of C.PACKAGE_BOXES) {
       const boxVolume = box.w * box.d * box.h;
