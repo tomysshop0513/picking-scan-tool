@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <!-- 版の番号（公開のたびに python tools/bump_version.py で上げる。下の config.js / common.js の ?v= も同じ番号にそろう） -->
-<meta name="app-version" content="2026-10-12.1">
+<meta name="app-version" content="2026-10-12.2">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>出荷ピッキング照合ツール</title>
 <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.23.0/umd/index.min.js"></script>
@@ -503,8 +503,8 @@
 
 <div class="scroll-hint" id="scrollHint"><span class="arrow">▼</span> スクロールして続きを見る</div>
 
-<script src="config.js?v=2026-10-12.1"></script>
-<script src="common.js?v=2026-10-12.1"></script>
+<script src="config.js?v=2026-10-12.2"></script>
+<script src="common.js?v=2026-10-12.2"></script>
 <script>
 const CFG = window.APP_CONFIG;
 
@@ -1032,6 +1032,7 @@ async function handleOrderCode(code) {
 
 /* ---------- STEP2: 商品照合（jan はカンマ区切りで複数可） ---------- */
 function renderPicking() {
+  noImage.clear();
   itemScanLock = false;
   itemPauseUntil = 0;
   document.getElementById("pickOrderTitle").textContent = currentOrder.orderId;
@@ -1041,7 +1042,9 @@ function renderPicking() {
 }
 
 /** 商品画像: images/先頭のJAN.jpg（ファイル名に使えない文字を含むJANは画像なし扱い） */
-const noImage = new Set();   // 読み込めなかった画像（スキャンのたびに描き直しても、もう一度は読みに行かない）
+// 読み込めなかった画像（同じ注文の中では、スキャンのたびに描き直しても、もう一度は読みに行かない）。
+// 注文ごとに忘れる: 画面を開いたままでも、あとから公開した画像は次の注文から表示される
+const noImage = new Set();
 function itemImageUrl(it) {
   const jan = jansOf(it)[0] || "";
   return /^[0-9A-Za-z_-]+$/.test(jan) ? `images/${jan}.jpg` : "";
