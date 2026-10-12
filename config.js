@@ -1,6 +1,6 @@
 /* 照合ツール・出荷指示書の印刷ページ 共通設定（ここだけ書き換えればよい） */
 // 版の番号（tools/bump_version.py が書き換える。照合ツールは index.html と同じ番号かを起動時に確かめる）
-(window.APP_FILE_VERSIONS = window.APP_FILE_VERSIONS || {})["config.js"] = "2026-10-12.3";
+(window.APP_FILE_VERSIONS = window.APP_FILE_VERSIONS || {})["config.js"] = "2026-10-12.4";
 window.APP_CONFIG = {
   // Apps Script の WebアプリURL（「デプロイを管理」で既存デプロイを更新すればURLは変わらない）
   GAS_URL: "https://script.google.com/macros/s/AKfycbzUdOLvKGwpf8UKGY3e319niJH_xvL-HtLC6Wv4Ow9G2Ir9vAnBBHVgFhiKg5ovnD7O/exec",
@@ -24,11 +24,11 @@ window.APP_CONFIG = {
   //      （上限の数は商品マスタで調整する。ここには書かない）
   //   2. それ以外は、商品マスタD〜F列の寸法(cm)で判定する（寸法が未登録の商品があれば「要手動確認」）
   //      箱: 注文の全商品が同じ寸法なら、内寸に向きを変えて並べて入る個数を数える。寸法が混ざるなら体積×FILL_RATE で判定
-  //      箱の w/d/h は内寸(cm)
+  //      箱の w/d/h は内寸(cm)。作業所で使っている箱の実測値（2026-10-12）
   PACKAGE_BOXES: [
-    { name: "60サイズ", w: 26.5, d: 19.5, h: 12.0 },
-    { name: "80サイズ", w: 35.0, d: 25.0, h: 18.0 },
-    { name: "100サイズ", w: 43.0, d: 31.0, h: 24.0 },
+    { name: "60サイズ", w: 30.0, d: 15.0, h: 11.0 },
+    { name: "80サイズ", w: 31.4, d: 22.1, h: 14.1 },
+    { name: "100サイズ", w: 37.7, d: 26.7, h: 28.4 },
   ],
   // メール便: クリックポスト（厚さ3cmまで）。底の大きさ w×d・厚み合計 maxThickness で判定する
   MAIL_NAME: "メール便",   // クリックポスト・ゆうパケット・ネコポスのどれでも使うため、名前は「メール便」だけにする
