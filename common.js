@@ -1,6 +1,6 @@
 /* 照合ツール(index.html)・出荷指示書(print.html) 共通処理 */
 // 版の番号（tools/bump_version.py が書き換える。照合ツールは index.html と同じ番号かを起動時に確かめる）
-(window.APP_FILE_VERSIONS = window.APP_FILE_VERSIONS || {})["common.js"] = "2026-10-12.4";
+(window.APP_FILE_VERSIONS = window.APP_FILE_VERSIONS || {})["common.js"] = "2026-10-13.1";
 (function () {
   const C = window.APP_CONFIG;
   const KEY_STORAGE = "pickingToolKey";
@@ -230,6 +230,20 @@
     return { name: "要手動確認", note: "自動判定の範囲外です。担当者の判断で選んでください" };
   }
 
+  /* ---------- 警告（本日出荷リストG列） ----------
+     G列が空でない注文は梱包させない。ただし「伝票番号登録済み・要確認」だけの注文は、
+     毛呂山分が未発送であることを人が確かめれば出荷してよい（印刷時に確認し、STEP1は黄色の表示だけで進める）。
+     ほかの警告と一緒に書かれているときは、書き方（区切り文字）に関係なく一致しないので、今までどおり止める */
+  const CONFIRMABLE_WARNING = "伝票番号登録済み・要確認";
+  /** 確認すれば印刷・梱包してよい警告か（G列の前後の空白を除いて完全一致） */
+  function isConfirmableWarning(w) {
+    return String(w ?? "").trim() === CONFIRMABLE_WARNING;
+  }
+  /** 印刷・梱包できない警告があるか（警告なし・確認すればよい警告だけ → false） */
+  function isBlockingWarning(w) {
+    return !!String(w ?? "").trim() && !isConfirmableWarning(w);
+  }
+
   function escapeHtml(s) {
     return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
@@ -240,5 +254,5 @@
   }
 
   window.Common = { ensureKey, changeKey, apiGet, apiPost, ApiError, jansOf, normalizeTracking, isTrackingFormat,
-                    estimatePackage, escapeHtml, clearKey };
+                    estimatePackage, escapeHtml, clearKey, isConfirmableWarning, isBlockingWarning };
 })();

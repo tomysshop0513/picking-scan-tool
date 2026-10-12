@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <!-- 版の番号（公開のたびに python tools/bump_version.py で上げる。下の config.js / common.js の ?v= も同じ番号にそろう） -->
-<meta name="app-version" content="2026-10-12.4">
+<meta name="app-version" content="2026-10-13.1">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>出荷ピッキング照合ツール</title>
 <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.23.0/umd/index.min.js"></script>
@@ -310,13 +310,16 @@
   .order-card.warn .meta{color:var(--ng);}
   .pill.gone{background:#f4f4f4;color:#999;}
   .pill.warn{background:var(--ng-bg);color:var(--ng);}
+  .order-card.confirm{border-color:#f0d3a6;background:#fdf8ee;}
+  .order-card.confirm .meta{color:var(--amber);}
+  .pill.confirm{background:#fdf1de;color:var(--amber);}
   .busy{font-size:15px;font-weight:700;color:var(--brand-dark);text-align:center;margin-top:10px;}
 
   .stop-panel{text-align:center;padding:36px 8px;}
   .stop-panel .big{font-size:30px;font-weight:900;line-height:1.4;margin:10px 0 14px;}
   .stop-panel.ng .big{color:var(--ng);}
   .stop-panel.amber .big{color:var(--amber);}
-  .stop-panel .detail{font-size:14px;color:#5a6b66;word-break:break-all;}
+  .stop-panel .detail{font-size:14px;color:#5a6b66;word-break:break-all;white-space:pre-line;}
 
   .dest-big{
     border:3px solid var(--brand);border-radius:18px;padding:22px 14px;margin:6px 0 14px;text-align:center;
@@ -418,6 +421,8 @@
       <div class="step-label">STEP 2 / 商品をスキャン</div>
       <div class="order-title" id="pickOrderTitle"></div>
       <div class="order-sub" id="pickOrderSub"></div>
+      <!-- 「伝票番号登録済み・要確認」の注文は、警告を黄色で出したままにする（スキャンのメッセージでは消さない） -->
+      <div id="pickWarn"></div>
 
       <!-- スマホの画面に商品カードが収まるよう、上部に固定するのはカメラ・状態表示・メッセージだけ -->
       <div class="picking-sticky-top">
@@ -503,8 +508,8 @@
 
 <div class="scroll-hint" id="scrollHint"><span class="arrow">▼</span> スクロールして続きを見る</div>
 
-<script src="config.js?v=2026-10-12.4"></script>
-<script src="common.js?v=2026-10-12.4"></script>
+<script src="config.js?v=2026-10-13.1"></script>
+<script src="common.js?v=2026-10-13.1"></script>
 <script>
 const CFG = window.APP_CONFIG;
 
@@ -525,7 +530,8 @@ if (FILE_VERSION_MISMATCH.length) {
     }
   } catch (e) {}
 }
-const { apiGet, apiPost, jansOf, normalizeTracking, isTrackingFormat, estimatePackage, escapeHtml } = window.Common;
+const { apiGet, apiPost, jansOf, normalizeTracking, isTrackingFormat, estimatePackage, escapeHtml,
+        isConfirmableWarning, isBlockingWarning } = window.Common;
 
 let currentOrder = null;   // { orderId, channel, customer, items, status, warning }
 let pickedCount = [];      // 商品明細の行ごとのスキャン数（同じJANが複数行にあっても混ざらない）
@@ -696,13 +702,17 @@ async function loadList() {
     return;
   }
   const pending = listCache.filter(o => o.status === "未処理");
-  const warn = pending.filter(o => o.warning).length;
-  summary.textContent = `未処理 ${pending.length}件` + (warn ? `（うち梱包できない注文 ${warn}件）` : "");
+  const warn = pending.filter(o => isBlockingWarning(o.warning)).length;
+  const toCheck = pending.filter(o => isConfirmableWarning(o.warning)).length;
+  const notes = [warn ? `梱包できない注文 ${warn}件` : "", toCheck ? `要確認 ${toCheck}件` : ""].filter(Boolean);
+  summary.textContent = `未処理 ${pending.length}件` + (notes.length ? `（うち${notes.join("・")}）` : "");
   list.innerHTML = "";
   listCache.forEach(o => {
     const div = document.createElement("div");
-    div.className = "order-card" + (o.status === "未処理" && o.warning ? " warn" : "");
-    const pill = o.status === "未処理" ? (o.warning ? ["warn", "梱包不可"] : ["", "未処理"])
+    // 「伝票番号登録済み・要確認」だけの注文は梱包できる（黄色の「要確認」）
+    const kind = o.status !== "未処理" || !o.warning ? "" : isConfirmableWarning(o.warning) ? "confirm" : "warn";
+    div.className = "order-card" + (kind ? " " + kind : "");
+    const pill = o.status === "未処理" ? (kind === "warn" ? ["warn", "梱包不可"] : kind === "confirm" ? ["confirm", "要確認"] : ["", "未処理"])
                : o.status === "完了" ? ["done", "完了"] : ["gone", o.status];
     div.innerHTML = `
       <div>
@@ -1004,7 +1014,8 @@ async function handleOrderCode(code) {
     stopWith("ng", "この注文は梱包しないでください", `${o.orderId} はキャンセル・発送済み等で出荷対象から外れました。`);
     return;
   }
-  if (o.warning) {
+  // 「伝票番号登録済み・要確認」だけの注文は止めない（未発送の確認は印刷時に済んでいる）。STEP2で警告を黄色で出したままにする
+  if (isBlockingWarning(o.warning)) {
     stopWith("ng", "この注文は梱包できません。担当者に連絡してください", `${o.orderId}：${o.warning}`);
     return;
   }
@@ -1022,7 +1033,10 @@ async function handleOrderCode(code) {
     // 出荷指示書の印刷記録漏れの検知用（作業は続けられる）
     stopWith("amber", "この指示書は印刷記録がありません",
       `${o.orderId} は「印刷記録」に記録がありません。印刷時に「印刷できましたか？」でOKを押し忘れた可能性があります。`
-      + "内容に問題がなければ、このまま進めます。", start);
+      + "内容に問題がなければ、このまま進めます。"
+      // 印刷記録が無い → 印刷時の未発送の確認をしていない可能性がある
+      + (isConfirmableWarning(o.warning)
+        ? `\n【${o.warning.trim()}】毛呂山分が未発送であることを確認してから進めてください。` : ""), start);
     return;
   }
   okSound();
@@ -1037,6 +1051,8 @@ function renderPicking() {
   itemPauseUntil = 0;
   document.getElementById("pickOrderTitle").textContent = currentOrder.orderId;
   document.getElementById("pickOrderSub").textContent = `${currentOrder.channel} ・ ${currentOrder.customer}`;
+  document.getElementById("pickWarn").innerHTML = isConfirmableWarning(currentOrder.warning)
+    ? `<div class="msg-banner amber">${escapeHtml(currentOrder.warning.trim())}</div>` : "";
   document.getElementById("pickBanner").innerHTML = "";
   renderItemList();
 }

@@ -124,6 +124,7 @@
   <h1>出荷指示書の印刷</h1>
   <div class="sub">本日出荷リストの「未処理」で、まだ印刷していない注文を表示しています（注文日時の古い順）。
     A4 1枚に6件（2列×3段、切り取り線つき。商品が多い注文は縦2枠または1ページ）。警告がある注文（赤字）は梱包できないため印刷できません。
+    ただし警告が「伝票番号登録済み・要確認」だけの注文は、毛呂山分が未発送であることを確かめてからチェックすれば印刷できます（「すべて選択」には含めません）。
     「ピッキングリスト印刷」は、未処理の注文すべての自社出荷(毛呂山)の商品を、棚番号順の総量リストにして印刷します（A4縦）。</div>
   <div id="keyArea"></div>
   <div class="toolbar">
@@ -150,9 +151,10 @@
 <script src="common.js"></script>
 <script src="picklist.js"></script>
 <script>
-const { apiGet, apiPost, estimatePackage, escapeHtml } = window.Common;
+const { apiGet, apiPost, estimatePackage, escapeHtml, isConfirmableWarning, isBlockingWarning } = window.Common;
 let allPending = [];   // 未処理の注文（注文日時の古い順）
 let shown = [];        // 表示中の注文
+const confirmedIds = new Set();   // 「伝票番号登録済み・要確認」で、未発送の確認にOKした注文
 
 // 一覧を読み込んでからこの時間がたっていたら、「選択した注文を印刷」で印刷の前に自動で読み直す
 const STALE_MS = 5 * 60 * 1000;
@@ -208,10 +210,15 @@ function render(keepIds) {
     const tr = document.createElement("tr");
     tr.className = o.warning ? "warn" : (o.printedAt ? "printed" : "");
     // 未印刷で警告の無い注文は最初から選択済み（印刷済みは再印刷になるので選択しない）
-    // 読み直したときは、それまでの選択を保つ（警告が付いた注文は選択できない）
-    const checked = !o.warning && (keepIds ? keepIds.has(o.orderId) : !o.printedAt);
+    // 読み直したときは、それまでの選択を保つ（印刷できない警告が付いた注文は選択できない）
+    // 「伝票番号登録済み・要確認」だけの注文は選択できるが、最初は選択しない（チェックするときに確認する）
+    const blocked = isBlockingWarning(o.warning);
+    const confirmable = isConfirmableWarning(o.warning);
+    // 読み直しで新たにこの警告が付いた注文は、確認していないので選択を外す
+    const checked = !blocked && (keepIds ? keepIds.has(o.orderId) && (!confirmable || confirmedIds.has(o.orderId))
+                                         : !o.printedAt && !confirmable);
     tr.innerHTML = `
-      <td><input type="checkbox" data-i="${i}" ${o.warning ? "disabled" : ""} ${checked ? "checked" : ""}></td>
+      <td><input type="checkbox" data-i="${i}" ${blocked ? "disabled" : ""} ${confirmable ? "data-confirm" : ""} ${checked ? "checked" : ""}></td>
       <td>${escapeHtml(o.orderedAt)}</td>
       <td>${escapeHtml(o.orderId)}</td>
       <td>${escapeHtml(o.channel)}</td>
@@ -230,14 +237,26 @@ function selected() {
 }
 function updateCount() {
   const unprinted = allPending.filter(o => !o.printedAt && !o.warning).length;
+  const confirmable = allPending.filter(o => !o.printedAt && isConfirmableWarning(o.warning)).length;
   document.getElementById("count").textContent =
-    `選択 ${selected().length}件 / 未印刷 ${unprinted}件（未処理 ${allPending.length}件）`;
+    `選択 ${selected().length}件 / 未印刷 ${unprinted}件`
+    + (confirmable ? `・要確認 ${confirmable}件` : "") + `（未処理 ${allPending.length}件）`;
 }
-document.getElementById("rows").addEventListener("change", updateCount);
+const CONFIRM_TRACKING_MSG = "伝票番号が登録済みです。毛呂山分が未発送であることを確認しましたか？";
+document.getElementById("rows").addEventListener("change", e => {
+  // 「伝票番号登録済み・要確認」の注文は、チェックを入れるときに確認する（キャンセルならチェックしない）
+  const c = e.target;
+  if (c.matches("input[data-confirm]") && c.checked) {
+    if (confirm(CONFIRM_TRACKING_MSG)) confirmedIds.add(shown[+c.dataset.i].orderId);
+    else c.checked = false;
+  }
+  updateCount();
+});
 document.getElementById("showPrinted").addEventListener("change", render);
 document.getElementById("reloadBtn").addEventListener("click", () => load());
 document.getElementById("allBtn").addEventListener("click", () => {
-  document.querySelectorAll("#rows input:not(:disabled)").forEach(c => c.checked = true); updateCount();
+  // 「伝票番号登録済み・要確認」の注文は含めない（1件ずつ確認してチェックする）
+  document.querySelectorAll("#rows input:not(:disabled):not([data-confirm])").forEach(c => c.checked = true); updateCount();
 });
 document.getElementById("noneBtn").addEventListener("click", () => {
   document.querySelectorAll("#rows input").forEach(c => c.checked = false); updateCount();
