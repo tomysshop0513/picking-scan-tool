@@ -136,10 +136,44 @@
     return new RegExp(C.TRACKING.pattern).test(no);
   }
 
+  /** 同じ寸法の商品を箱(内寸)に何個入れられるか。
+   *  向きを変えて「何個並べて何段積めるか」を数え、並べたあとの隙間（3つの直方体）にも、向きを変えて同じように詰める。
+   *  隙間の分け方は6通りを試して一番多いものを使う（実際にその通りに詰められる並べ方だけを数える） */
+  function countFit(box, item) {
+    const dims = [item.w, item.d, item.h];
+    const orients = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]].map(o => o.map(i => dims[i]));
+    const splits = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+    const minSide = Math.min(...dims);
+    const memo = new Map();
+    const fill = (L) => {
+      if (Math.min(...L) < minSide - 1e-9) return 0;
+      const key = L.map(v => v.toFixed(3)).sort().join("|");   // 向きは全部試すので、空間の辺の順番は区別しない
+      if (memo.has(key)) return memo.get(key);
+      let best = 0;
+      for (const o of orients) {
+        const n = L.map((len, i) => Math.floor(len / o[i] + 1e-9));
+        if (!n[0] || !n[1] || !n[2]) continue;
+        const used = n.map((k, i) => k * o[i]);
+        let rest = 0;
+        for (const [p, q, r] of splits) {
+          const a = L.slice(); a[p] = L[p] - used[p];                          // p 方向の余り（ほかは全部）
+          const b = L.slice(); b[p] = used[p]; b[q] = L[q] - used[q];         // q 方向の余り
+          const c = L.slice(); c[p] = used[p]; c[q] = used[q]; c[r] = L[r] - used[r];   // r 方向の余り
+          rest = Math.max(rest, fill(a) + fill(b) + fill(c));
+        }
+        best = Math.max(best, n[0] * n[1] * n[2] + rest);
+      }
+      memo.set(key, best);
+      return best;
+    };
+    return fill([box.w, box.d, box.h]);
+  }
+
   /** 梱包資材の自動判定(目安)
    *  1. 全商品に mailMax（商品マスタ「メール便上限数」）があれば、各商品の 数量÷上限 の合計が1以下ならメール便。
    *     1を超えたらメール便にはしない（寸法の厚み判定もしない）で箱を判定する
-   *  2. 1つでも mailMax が無ければ、今までどおり寸法(w/d/h)で判定する。寸法が無い商品があれば判定しない */
+   *  2. 1つでも mailMax が無ければ、今までどおり寸法(w/d/h)で判定する。寸法が無い商品があれば判定しない
+   *     メール便（底の大きさ・厚み合計）→ 箱。箱は、全商品が同じ寸法なら入る個数を数え（countFit）、混ざるなら体積で判定 */
   function estimatePackage(items) {
     if (!items.length) return { name: "要手動確認", note: "商品がありません" };
     const allMailMax = items.every(it => Number.isInteger(it.mailMax) && it.mailMax > 0);
@@ -167,6 +201,21 @@
     if (!allMailMax && fitsMailFootprint && totalThickness <= C.MAIL_FOOTPRINT.maxThickness + 1e-9) {
       return { name: C.MAIL_NAME, note: `厚み合計 目安 ${totalThickness.toFixed(1)}cm` };
     }
+    // 全商品が同じ寸法（向きは問わない）→ 箱の内寸に入る個数を数えて、入る一番小さい箱にする
+    const sorted3 = it => [it.w, it.d, it.h].sort((a, b) => a - b);
+    const first = sorted3(items[0]);
+    if (items.every(it => sorted3(it).every((v, i) => Math.abs(v - first[i]) < 1e-9))) {
+      const total = items.reduce((s, it) => s + it.qty, 0);
+      let cap = 0;
+      for (const box of C.PACKAGE_BOXES) {
+        cap = countFit(box, items[0]);
+        if (cap >= total) {
+          return { name: box.name, note: `同じ寸法の商品 ${total}個（この箱に並べて最大${cap}個）` };
+        }
+      }
+      return { name: "要手動確認", note: `いちばん大きい箱にも入りません（${total}個 / 最大${cap}個）。担当者の判断で選んでください` };
+    }
+    // 寸法の違う商品が混ざる → 体積で判定（隙間を考慮した係数 FILL_RATE）
     for (const box of C.PACKAGE_BOXES) {
       const boxVolume = box.w * box.d * box.h;
       const eachItemFits = items.every(it => {
