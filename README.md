@@ -13,6 +13,7 @@
 | `gas/Code.gs` | Apps Script（作業記録スプレッドシートに紐づくスクリプト）のコード。更新手順は `gas/DEPLOY.md` |
 | `images/` | 商品画像（照合ツールのSTEP2で表示。ファイル名は「先頭のJAN.jpg」） |
 | `tools/bump_version.py` | 照合ツールの版の番号を上げる（公開のたびに実行。下の「版の番号と自動の読み込み直し」） |
+| `tools/check_version.py` / `tools/hooks/pre-push` | 版の番号の上げ忘れ・食い違いを確かめる（main への push のときに自動で実行） |
 | `tools/resize_images.py` | 商品画像を表示用（白い余白を切り落とし、長い辺600px・JPEG）に縮小して `images/` に置くスクリプト |
 | `dev/mock-gas-server.mjs` | 試験用サーバー（本物の Code.gs を偽のシートで動かす。本番には接続しない） |
 
@@ -34,7 +35,17 @@ Apps Script のトークンは公開リポジトリに載せず、各端末で�
 - 版の番号は index.html の `<meta name="app-version">`（例: `2026-10-12.1` ＝ 日付.その日の連番）。画面の左下に小さく「版 …」と表示する。
   読み込み直した直後は、緑で「（前の版 から更新しました）」と10秒表示する
 - **公開する（main に入れる）ときは、先に `python tools/bump_version.py` を実行して、版の番号をコミットに含める**
-  （config.js・common.js の読み込み `?v=` も同じ番号にそろう。番号を上げないとスマホは読み込み直さない）
+  （番号を上げないとスマホは読み込み直さない）。次の4か所が同じ番号にそろう:
+  index.html の `<meta name="app-version">`・index.html の `config.js?v=` と `common.js?v=`・config.js と common.js の中の番号（`APP_FILE_VERSIONS`）
+- **上げ忘れの防止**: main へ push するときに `tools/check_version.py` が自動で動き、次の場合は push を止めて理由を出す
+  - 照合ツールのファイル（index.html / config.js / common.js）が前の main と変わっているのに、版の番号が大きくなっていない
+  - 上の4か所の番号がそろっていない・index.html が読み込む自分の .js / .css に `?v=版の番号` が付いていない
+  - 有効にする設定（PCごとに1回）: `git config core.hooksPath tools/hooks`（この PC は設定済み）。手で確かめるときは `python tools/check_version.py`
+- **同じ版のファイルがそろう仕組み**: スマホは `?v=版の番号` 付きの新しいURLで読むので、手元に残った古い config.js / common.js は使わない。
+  さらに起動時に、読み込んだ config.js / common.js の中の番号が index.html と同じかを確かめ、違えば3秒後に1回だけ読み込み直す。
+  それでも違えば、左下の版の表示を赤くして「ファイルの版が違います」と知らせる（作業はできる。少し待ってページを読み込み直す）。
+  ※ GitHub Pages の配信サーバーは `?` 以降を区別せずに最大10分ためるが、公開のたびに入れ替わるので、通常は公開直後から新しいファイルがそろう
+- 版の確認のための index.html の取得は、毎回新しいURL（`?check=時刻`）と `cache: "no-store"` で、スマホに残ったものは使わない
 - 確かめるとき: 開いたとき・出荷リスト(ホーム)や STEP1 に戻ったとき（「次の注文へ」を含む）・アプリを前面に戻したとき。
   公開中の index.html を1回読むだけ（通信できなければ今の版のまま）
 - 読み込み直さないとき: 注文の照合の途中（STEP1で確認中・STEP2・ピッキング完了の表示・STEP3・梱包完了・作業できません の画面）。次の区切りで読み込み直す
