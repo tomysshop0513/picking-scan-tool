@@ -2,6 +2,8 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
+<!-- 版の番号（公開のたびに python tools/bump_version.py で上げる。下の config.js / common.js の ?v= も同じ番号にそろう） -->
+<meta name="app-version" content="2026-10-12.1">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>出荷ピッキング照合ツール</title>
 <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.23.0/umd/index.min.js"></script>
@@ -288,6 +290,12 @@
   .complete-panel h2{font-size:22px;margin:0 0 6px;}
   .complete-panel p{color:#5a6b66;font-size:14px;}
 
+  /* 版の番号（画面の左下に小さく。どの版で動いているかの確認用） */
+  .app-version{
+    position:fixed;left:6px;bottom:4px;z-index:40;pointer-events:none;
+    font-size:10px;color:#8a9a95;background:rgba(255,255,255,.75);padding:1px 5px;border-radius:6px;
+  }
+  .app-version.updated{color:#fff;background:var(--ok);font-weight:700;}
   .footer-note{
     font-size:12px;color:#8a9a95;text-align:center;padding:14px 20px 24px;
   }
@@ -490,10 +498,12 @@
   </div>
 </div>
 
+<div class="app-version" id="appVersion"></div>
+
 <div class="scroll-hint" id="scrollHint"><span class="arrow">▼</span> スクロールして続きを見る</div>
 
-<script src="config.js"></script>
-<script src="common.js"></script>
+<script src="config.js?v=2026-10-12.1"></script>
+<script src="common.js?v=2026-10-12.1"></script>
 <script>
 const CFG = window.APP_CONFIG;
 const { apiGet, apiPost, jansOf, normalizeTracking, isTrackingFormat, estimatePackage, escapeHtml } = window.Common;
@@ -524,6 +534,7 @@ function showScreen(name, title, showBack) {
   document.getElementById("pickDone").classList.remove("show");
   stopAllCameras();
   window.scrollTo(0, 0);
+  if (name === "home" || name === "scanOrder") setTimeout(() => checkForUpdate(), 0);   // 作業の区切りで新しい版を確かめる
   updateScrollHint();
   if (name === "scanOrder") {
     orderScanLock = false; orderPauseUntil = 0;
@@ -1275,8 +1286,79 @@ function handleReadTest(raw, result) {
   while (log.children.length > 20) log.removeChild(log.lastChild);
 }
 
+/* ---------- 新しい版の自動読み込み ----------
+   公開されている index.html の版（<meta name="app-version">）がこの画面より新しければ、読み込み直す。
+   確かめるのは: 開いたとき・出荷リスト(ホーム)や STEP1 に戻ったとき・アプリを前面に戻したとき。
+   注文の照合の途中（STEP1で確認中、STEP2・STEP3、作業できません画面など）では読み込み直さない。
+   読み込み直したあとは、同じ画面（ホーム / STEP1）・同じ担当者で再開する */
+const APP_VERSION = document.querySelector('meta[name="app-version"]').content;
+const UPDATE_TRIED = "pickingToolUpdateTried";   // sessionStorage: 読み込み直した先の版（古いまま戻ってきたら繰り返さない）
+const UPDATE_RESUME = "pickingToolUpdateResume"; // sessionStorage: 読み込み直したあとに戻す画面・担当者
+
+function activeScreen() {
+  return Object.keys(screens).find(k => screens[k].classList.contains("active")) || "";
+}
+/** 今読み込み直してよいか（作業の途中でない） */
+function canReloadNow() {
+  if (currentOrder || pendingRecord) return false;
+  const s = activeScreen();
+  if (s === "home") return true;
+  if (s === "scanOrder") return !orderScanLock && Date.now() >= orderPauseUntil;
+  return false;
+}
+// 確かめるのは作業の区切り（画面の切り替え・前面に戻したとき）だけなので、間隔の制限はつけない（index.html 1回分の通信）
+async function checkForUpdate() {
+  if (!canReloadNow()) return;
+  let live = "";
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    const res = await fetch(`index.html?check=${Date.now()}`, { cache: "no-store", signal: ctrl.signal });
+    const text = res.ok ? await res.text() : "";
+    clearTimeout(timer);
+    const m = text.match(/<meta name="app-version" content="([^"]+)">/);
+    live = m ? m[1] : "";
+  } catch (e) {
+    return;   // 通信できないときは何もしない（作業は今の版で続けられる）
+  }
+  if (!live || live.localeCompare(APP_VERSION, "en", { numeric: true }) <= 0) return;
+  if (!canReloadNow()) return;   // 確かめている間に作業が始まっていたら、次の区切りまで待つ
+  try {
+    if (sessionStorage.getItem(UPDATE_TRIED) === live) return;   // 読み込み直したのに古いまま → 繰り返さない
+    sessionStorage.setItem(UPDATE_TRIED, live);
+    sessionStorage.setItem(UPDATE_RESUME, JSON.stringify({ screen: activeScreen(), worker: currentWorker, from: APP_VERSION }));
+  } catch (e) {
+    return;   // 記録できない（プライベートモード等）ときは、繰り返しを防げないので読み込み直さない
+  }
+  stopAllCameras();
+  location.replace(`${location.pathname}?v=${encodeURIComponent(live)}`);   // URLを変えて、古いページを使わせない
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") checkForUpdate();
+});
+
+/** 読み込み直したあと: 同じ担当者・同じ画面に戻し、版の表示を少しの間目立たせる */
+function resumeAfterUpdate() {
+  let r = null;
+  try {
+    r = JSON.parse(sessionStorage.getItem(UPDATE_RESUME) || "null");
+    sessionStorage.removeItem(UPDATE_RESUME);
+  } catch (e) {}
+  if (!r) return;
+  if (r.worker) { currentWorker = r.worker; renderWorkerSelect(); }
+  const el = document.getElementById("appVersion");
+  el.textContent = `版 ${APP_VERSION}（${r.from} から更新しました）`;
+  el.classList.add("updated");
+  setTimeout(() => { el.textContent = `版 ${APP_VERSION}`; el.classList.remove("updated"); }, 10000);
+  if (r.screen === "scanOrder" && currentWorker) showScreen("scanOrder", "出荷指示書をスキャン", true);
+}
+
 /* ---------- 起動 ---------- */
-window.Common.ensureKey(document.getElementById("keyArea"), () => goHome());
+document.getElementById("appVersion").textContent = `版 ${APP_VERSION}`;
+window.Common.ensureKey(document.getElementById("keyArea"), () => {
+  goHome();
+  resumeAfterUpdate();
+});
 </script>
 </body>
 </html>
