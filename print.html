@@ -252,7 +252,8 @@ document.getElementById("rows").addEventListener("change", e => {
   }
   updateCount();
 });
-document.getElementById("showPrinted").addEventListener("change", render);
+// 表示を切り替えても、それまでの選択を保つ（render にイベントを渡さない）
+document.getElementById("showPrinted").addEventListener("change", () => render(new Set(selected().map(o => o.orderId))));
 document.getElementById("reloadBtn").addEventListener("click", () => load());
 document.getElementById("allBtn").addEventListener("click", () => {
   // 「伝票番号登録済み・要確認」の注文は含めない（1件ずつ確認してチェックする）
