@@ -156,6 +156,9 @@
   .manual-entry button{
     background:var(--ink);color:#fff;border:none;border-radius:12px;padding:0 18px;font-weight:700;
   }
+  /* 押せない状態（STEP1の確認中）。入力した文字は残したまま灰色にする */
+  .manual-entry input:disabled{background:#eceff0;color:#8a9a95;-webkit-text-fill-color:#8a9a95;opacity:1;}
+  .manual-entry button:disabled{background:#b9c3c0;color:#eef2f0;}
 
   .step-label{font-size:13px;font-weight:700;color:var(--brand);letter-spacing:.04em;margin-bottom:4px;}
   .order-title{font-size:20px;font-weight:800;margin:0 0 2px;}
@@ -923,6 +926,8 @@ function stopWith(kind, big, detail, onProceed) {
 let orderScanLock = false;
 let orderPauseUntil = 0;
 document.getElementById("manualOrderBtn").addEventListener("click", () => {
+  // 確認中は受け付けない（ボタンも押せない）。入力した番号は消さずに残す
+  if (orderScanLock) return;
   const v = document.getElementById("manualOrder").value.trim();
   if (v) handleOrderCode(v);
   document.getElementById("manualOrder").value = "";
@@ -930,8 +935,11 @@ document.getElementById("manualOrderBtn").addEventListener("click", () => {
 
 // 確認中: カメラ映像の位置に「注文の状態を確認しています…」（大きな赤字）。カメラは止めずに見えなくするだけ
 const ORDER_CHECK_TIMEOUT_MS = 20000;   // これ以上応答が無ければ通信エラーにして、カメラ映像に戻す
+// 確認中は手入力欄と「照合」ボタンも押せなくする（灰色）。入力欄の文字は消さない
 function setOrderChecking(on) {
   document.getElementById("scanBoxOrder").classList.toggle("checking", on);
+  document.getElementById("manualOrder").disabled = on;
+  document.getElementById("manualOrderBtn").disabled = on;
 }
 
 async function handleOrderCode(code) {
