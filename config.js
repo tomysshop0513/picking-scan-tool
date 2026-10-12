@@ -1,4 +1,6 @@
 /* 照合ツール・出荷指示書の印刷ページ 共通設定（ここだけ書き換えればよい） */
+// 版の番号（tools/bump_version.py が書き換える。照合ツールは index.html と同じ番号かを起動時に確かめる）
+(window.APP_FILE_VERSIONS = window.APP_FILE_VERSIONS || {})["config.js"] = "2026-10-12.1";
 window.APP_CONFIG = {
   // Apps Script の WebアプリURL（「デプロイを管理」で既存デプロイを更新すればURLは変わらない）
   GAS_URL: "https://script.google.com/macros/s/AKfycbzUdOLvKGwpf8UKGY3e319niJH_xvL-HtLC6Wv4Ow9G2Ir9vAnBBHVgFhiKg5ovnD7O/exec",

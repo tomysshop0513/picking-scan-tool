@@ -1,0 +1,16 @@
+#!/bin/sh
+# main へ push するときに、照合ツールの版の番号の上げ忘れ・食い違いを止める（tools/check_version.py）。
+# 有効にする（このリポジトリで1回だけ）: git config core.hooksPath tools/hooks
+zero=0000000000000000000000000000000000000000
+PY=python
+command -v "$PY" >/dev/null 2>&1 || PY=python3
+while read local_ref local_sha remote_ref remote_sha; do
+  [ "$remote_ref" = "refs/heads/main" ] || continue
+  [ "$local_sha" = "$zero" ] && continue          # main の削除は対象外
+  if [ "$remote_sha" = "$zero" ] || ! git cat-file -e "$remote_sha" 2>/dev/null; then
+    "$PY" tools/check_version.py "" "$local_sha" || exit 1
+  else
+    "$PY" tools/check_version.py "$remote_sha" "$local_sha" || exit 1
+  fi
+done
+exit 0

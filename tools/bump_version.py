@@ -1,21 +1,26 @@
-"""照合ツール（index.html）の版の番号を上げる。公開する（main に入れる）前に実行して、変更をコミットに含める。
+"""照合ツールの版の番号を上げる。公開する（main に入れる）前に実行して、変更をコミットに含める。
 
 使い方（picking-scan-tool フォルダで）:
     python tools/bump_version.py
 
 - 版の番号は「日付.その日の連番」（例: 2026-10-12.1 → 同じ日にもう一度なら 2026-10-12.2）。日付は日本時間
-- index.html の <meta name="app-version"> と、config.js / common.js の読み込み（?v=）を同じ番号にそろえる
-  （スマホが古い config.js / common.js を使い続けないように）
+- 次の4か所を同じ番号にそろえる（スマホが古い config.js / common.js を混ぜて使わないように）
+    index.html の <meta name="app-version"> / index.html の config.js?v= と common.js?v=
+    config.js と common.js の中の版の番号（APP_FILE_VERSIONS）
 - 作業所のスマホは、公開された版の番号が新しければ、作業の区切りで自動で読み込み直す（index.html の checkForUpdate）
+- 上げ忘れは tools/check_version.py（main へ push するときに自動で実行）が止める
 """
 import re
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-INDEX = Path(__file__).resolve().parent.parent / "index.html"
+ROOT = Path(__file__).resolve().parent.parent
 META = re.compile(r'(<meta name="app-version" content=")([^"]+)(">)')
 SCRIPT = re.compile(r'(<script src="(?:config|common)\.js\?v=)([^"]+)(">)')
+MARK = re.compile(r'(\["(?:config|common)\.js"\] = ")([^"]+)(";)')
+# ファイル → (置き換える形, 想定の件数)
+TARGETS = {"index.html": [(META, 1), (SCRIPT, 2)], "config.js": [(MARK, 1)], "common.js": [(MARK, 1)]}
 
 
 def next_version(current: str) -> str:
@@ -27,20 +32,25 @@ def next_version(current: str) -> str:
 
 
 def main():
-    raw = INDEX.read_bytes().decode("utf-8")
-    m = META.search(raw)
+    index = (ROOT / "index.html").read_bytes().decode("utf-8")
+    m = META.search(index)
     if not m:
         print('index.html に <meta name="app-version"> が見つかりません')
         return 1
     old = m.group(2)
     new = next_version(old)
-    raw, n_meta = META.subn(lambda x: x.group(1) + new + x.group(3), raw)
-    raw, n_script = SCRIPT.subn(lambda x: x.group(1) + new + x.group(3), raw)
-    if n_meta != 1 or n_script != 2:
-        print(f"置き換えの数が想定と違います（meta {n_meta}件 / script {n_script}件）。index.html を確認してください")
-        return 1
-    INDEX.write_bytes(raw.encode("utf-8"))   # 改行コードはそのまま
-    print(f"版の番号: {old} → {new}")
+    out = {}
+    for name, rules in TARGETS.items():
+        raw = (ROOT / name).read_bytes().decode("utf-8")
+        for pat, want in rules:
+            raw, n = pat.subn(lambda x: x.group(1) + new + x.group(3), raw)
+            if n != want:
+                print(f"{name}: 版の番号の場所が {want}件 のはずが {n}件 でした。ファイルを確認してください（何も書き換えていません）")
+                return 1
+        out[name] = raw
+    for name, raw in out.items():   # 全部確かめてから書く（途中で止まって一部だけ変わることがないように）
+        (ROOT / name).write_bytes(raw.encode("utf-8"))   # 改行コードはそのまま
+    print(f"版の番号: {old} → {new}（{' / '.join(out)}）")
     return 0
 
 

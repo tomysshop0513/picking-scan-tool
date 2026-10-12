@@ -296,6 +296,7 @@
     font-size:10px;color:#8a9a95;background:rgba(255,255,255,.75);padding:1px 5px;border-radius:6px;
   }
   .app-version.updated{color:#fff;background:var(--ok);font-weight:700;}
+  .app-version.mismatch{color:#fff;background:var(--ng);font-weight:700;font-size:12px;right:6px;}
   .footer-note{
     font-size:12px;color:#8a9a95;text-align:center;padding:14px 20px 24px;
   }
@@ -506,6 +507,24 @@
 <script src="common.js?v=2026-10-12.1"></script>
 <script>
 const CFG = window.APP_CONFIG;
+
+/* ---------- 版の番号: 読み込んだ config.js / common.js がこの画面(index.html)と同じ版か ----------
+   スマホ・公開サーバーに古いファイルが残っていると、index.html だけ新しく common.js が古い、という組み合わせになりうる。
+   そろっていなければ、少し待って1回だけ読み込み直す（それでもそろわなければ、左下の版の表示を赤くして知らせる） */
+const APP_VERSION = document.querySelector('meta[name="app-version"]').content;
+const FILE_VERSION_MISMATCH = ["config.js", "common.js"]
+  .filter(f => (window.APP_FILE_VERSIONS || {})[f] !== APP_VERSION)
+  .map(f => `${f}=${(window.APP_FILE_VERSIONS || {})[f] || "不明"}`);
+let mismatchReloadScheduled = false;
+if (FILE_VERSION_MISMATCH.length) {
+  try {
+    if (sessionStorage.getItem("pickingToolMismatchTried") !== APP_VERSION) {
+      sessionStorage.setItem("pickingToolMismatchTried", APP_VERSION);
+      mismatchReloadScheduled = true;
+      setTimeout(() => location.replace(`${location.pathname}?v=${encodeURIComponent(APP_VERSION)}&r=${Date.now()}`), 3000);
+    }
+  } catch (e) {}
+}
 const { apiGet, apiPost, jansOf, normalizeTracking, isTrackingFormat, estimatePackage, escapeHtml } = window.Common;
 
 let currentOrder = null;   // { orderId, channel, customer, items, status, warning }
@@ -1291,7 +1310,6 @@ function handleReadTest(raw, result) {
    確かめるのは: 開いたとき・出荷リスト(ホーム)や STEP1 に戻ったとき・アプリを前面に戻したとき。
    注文の照合の途中（STEP1で確認中、STEP2・STEP3、作業できません画面など）では読み込み直さない。
    読み込み直したあとは、同じ画面（ホーム / STEP1）・同じ担当者で再開する */
-const APP_VERSION = document.querySelector('meta[name="app-version"]').content;
 const UPDATE_TRIED = "pickingToolUpdateTried";   // sessionStorage: 読み込み直した先の版（古いまま戻ってきたら繰り返さない）
 const UPDATE_RESUME = "pickingToolUpdateResume"; // sessionStorage: 読み込み直したあとに戻す画面・担当者
 
@@ -1342,11 +1360,15 @@ function resumeAfterUpdate() {
   let r = null;
   try {
     r = JSON.parse(sessionStorage.getItem(UPDATE_RESUME) || "null");
-    sessionStorage.removeItem(UPDATE_RESUME);
+    if (!mismatchReloadScheduled) sessionStorage.removeItem(UPDATE_RESUME);   // ファイルの版をそろえるために読み込み直すときは、戻す先を残す
   } catch (e) {}
   if (!r) return;
   if (r.worker) { currentWorker = r.worker; renderWorkerSelect(); }
   const el = document.getElementById("appVersion");
+  if (FILE_VERSION_MISMATCH.length) {   // 版が違う表示（赤）を優先する
+    if (r.screen === "scanOrder" && currentWorker) showScreen("scanOrder", "出荷指示書をスキャン", true);
+    return;
+  }
   el.textContent = `版 ${APP_VERSION}（${r.from} から更新しました）`;
   el.classList.add("updated");
   setTimeout(() => { el.textContent = `版 ${APP_VERSION}`; el.classList.remove("updated"); }, 10000);
@@ -1355,6 +1377,11 @@ function resumeAfterUpdate() {
 
 /* ---------- 起動 ---------- */
 document.getElementById("appVersion").textContent = `版 ${APP_VERSION}`;
+if (FILE_VERSION_MISMATCH.length) {
+  const el = document.getElementById("appVersion");
+  el.textContent = `版 ${APP_VERSION}（ファイルの版が違います: ${FILE_VERSION_MISMATCH.join(" / ")}。ページを読み込み直してください）`;
+  el.classList.add("mismatch");
+}
 window.Common.ensureKey(document.getElementById("keyArea"), () => {
   goHome();
   resumeAfterUpdate();

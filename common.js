@@ -1,4 +1,6 @@
 /* 照合ツール(index.html)・出荷指示書(print.html) 共通処理 */
+// 版の番号（tools/bump_version.py が書き換える。照合ツールは index.html と同じ番号かを起動時に確かめる）
+(window.APP_FILE_VERSIONS = window.APP_FILE_VERSIONS || {})["common.js"] = "2026-10-12.1";
 (function () {
   const C = window.APP_CONFIG;
   const KEY_STORAGE = "pickingToolKey";
