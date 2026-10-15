@@ -1,6 +1,6 @@
 /* 照合ツール(index.html)・出荷指示書(print.html) 共通処理 */
 // 版の番号（tools/bump_version.py が書き換える。照合ツールは index.html と同じ番号かを起動時に確かめる）
-(window.APP_FILE_VERSIONS = window.APP_FILE_VERSIONS || {})["common.js"] = "2026-10-13.1";
+(window.APP_FILE_VERSIONS = window.APP_FILE_VERSIONS || {})["common.js"] = "2026-10-15.1";
 (function () {
   const C = window.APP_CONFIG;
   const KEY_STORAGE = "pickingToolKey";
@@ -174,6 +174,31 @@
    *     1を超えたらメール便にはしない（寸法の厚み判定もしない）で箱を判定する
    *  2. 1つでも mailMax が無ければ、今までどおり寸法(w/d/h)で判定する。寸法が無い商品があれば判定しない
    *     メール便（底の大きさ・厚み合計）→ 箱。箱は、全商品が同じ寸法なら入る個数を数え（countFit）、混ざるなら体積で判定 */
+  /** メール便の厚み(目安cm)。底 31×22cm に、F列の高さを厚みにしたまま横に並べ、並べきれない分だけ段を重ねる。
+   *  商品の種類ごとに別の段にする（混ぜて並べる隙間までは考えない）: Σ 切り上げ(数量÷1段に並ぶ数) × 高さ
+   *  寸法が無い・底に入らない商品があれば null */
+  function mailThickness(items) {
+    const F = C.MAIL_FOOTPRINT;
+    let t = 0;
+    for (const it of items) {
+      if (!(it.w > 0 && it.d > 0 && it.h > 0)) return null;
+      const perLayer = Math.max(
+        Math.floor(F.w / it.w + 1e-9) * Math.floor(F.d / it.d + 1e-9),
+        Math.floor(F.w / it.d + 1e-9) * Math.floor(F.d / it.w + 1e-9));
+      if (!perLayer) return null;
+      t += Math.ceil((Number(it.qty) || 0) / perLayer - 1e-9) * it.h;
+    }
+    return t;
+  }
+
+  /** メール便の厚みの区分（ピッキングリストの集計用）: "1cm" / "2cm" / "3cm" / "厚み不明"。
+   *  メール便上限数で判定した注文は、上限数を優先して3cmを超えても「3cm」にする */
+  function mailThicknessClass(pkg) {
+    if (!(pkg.thickness > 0)) return "厚み不明";
+    const cm = Math.min(Math.max(Math.ceil(pkg.thickness - 1e-9), 1), Math.ceil(C.MAIL_FOOTPRINT.maxThickness));
+    return cm + "cm";
+  }
+
   function estimatePackage(items) {
     if (!items.length) return { name: "要手動確認", note: "商品がありません" };
     const allMailMax = items.every(it => Number.isInteger(it.mailMax) && it.mailMax > 0);
@@ -181,7 +206,10 @@
       const ratio = items.reduce((s, it) => s + it.qty / it.mailMax, 0);
       const detail = items.map(it => `${it.qty}/${it.mailMax}`).join("＋");
       if (ratio <= 1 + 1e-9) {
-        return { name: C.MAIL_NAME, note: `メール便上限数で判定（数量/上限 ${detail}${items.length > 1 ? ` ＝ ${ratio.toFixed(2)}` : ""}）` };
+        const t = mailThickness(items);
+        return { name: C.MAIL_NAME, thickness: t,
+                 note: `メール便上限数で判定（数量/上限 ${detail}${items.length > 1 ? ` ＝ ${ratio.toFixed(2)}` : ""}）`
+                       + (t ? `・厚み目安 ${t.toFixed(1)}cm` : "") };
       }
     }
     if (items.some(it => !(it.w > 0 && it.d > 0 && it.h > 0))) {
@@ -189,17 +217,11 @@
                                                    : "寸法が未登録の商品があります（商品マスタD〜F列）" };
     }
     let totalVolume = 0;
-    let totalThickness = 0;
-    let fitsMailFootprint = true;
-    items.forEach(it => {
-      totalVolume += it.w * it.d * it.h * it.qty;
-      totalThickness += it.h * it.qty;
-      const sides = [it.w, it.d].sort((a, b) => b - a);
-      const frame = [C.MAIL_FOOTPRINT.w, C.MAIL_FOOTPRINT.d].sort((a, b) => b - a);
-      if (!(sides[0] <= frame[0] && sides[1] <= frame[1])) fitsMailFootprint = false;
-    });
-    if (!allMailMax && fitsMailFootprint && totalThickness <= C.MAIL_FOOTPRINT.maxThickness + 1e-9) {
-      return { name: C.MAIL_NAME, note: `厚み合計 目安 ${totalThickness.toFixed(1)}cm` };
+    items.forEach(it => { totalVolume += it.w * it.d * it.h * it.qty; });
+    // 横に並べた厚み（例: 細長い商品2本は重ねず並べるので厚み1本分）
+    const thickness = allMailMax ? null : mailThickness(items);
+    if (thickness !== null && thickness <= C.MAIL_FOOTPRINT.maxThickness + 1e-9) {
+      return { name: C.MAIL_NAME, thickness, note: `厚み目安 ${thickness.toFixed(1)}cm（横に並べた場合）` };
     }
     // 全商品が同じ寸法（向きは問わない）→ 箱の内寸に入る個数を数えて、入る一番小さい箱にする
     const sorted3 = it => [it.w, it.d, it.h].sort((a, b) => a - b);
@@ -254,5 +276,5 @@
   }
 
   window.Common = { ensureKey, changeKey, apiGet, apiPost, ApiError, jansOf, normalizeTracking, isTrackingFormat,
-                    estimatePackage, escapeHtml, clearKey, isConfirmableWarning, isBlockingWarning };
+                    estimatePackage, mailThicknessClass, escapeHtml, clearKey, isConfirmableWarning, isBlockingWarning };
 })();

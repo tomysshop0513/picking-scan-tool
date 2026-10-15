@@ -110,6 +110,11 @@
   .pick tr.sep td{border-bottom:0.4mm solid #000;padding:4mm 2mm 1mm;font-size:11pt;font-weight:800;}
   .pick .total{display:flex;justify-content:flex-end;align-items:baseline;gap:6mm;border-top:0.6mm solid #000;margin-top:-0.25mm;padding-top:2mm;font-size:14pt;font-weight:800;break-inside:avoid;}
   .pick .total b{font-size:28pt;font-weight:900;}
+  .pick .pkg-sum{margin-top:3mm;border:0.6mm solid #000;padding:2mm 3mm;break-inside:avoid;}
+  .pick .pkg-sum .mail{font-size:16pt;font-weight:800;}
+  .pick .pkg-sum .mail b{font-size:22pt;font-weight:900;margin:0 1mm;}
+  .pick .pkg-sum .mail span{margin-right:6mm;white-space:nowrap;}
+  .pick .pkg-sum .other{font-size:11pt;margin-top:1mm;}
   .pick .warn-list{margin-top:5mm;font-size:10.5pt;border:0.4mm solid #000;padding:2mm 3mm;break-inside:avoid;}
   .pick .warn-list div{margin-top:0.8mm;font-family:Consolas,"Yu Gothic",monospace;}
   .toolbar label{font-size:14px;display:flex;align-items:center;gap:4px;}
@@ -151,7 +156,7 @@
 <script src="common.js"></script>
 <script src="picklist.js"></script>
 <script>
-const { apiGet, apiPost, estimatePackage, escapeHtml, isConfirmableWarning, isBlockingWarning } = window.Common;
+const { apiGet, apiPost, estimatePackage, mailThicknessClass, escapeHtml, isConfirmableWarning, isBlockingWarning } = window.Common;
 let allPending = [];   // 未処理の注文（注文日時の古い順）
 let shown = [];        // 表示中の注文
 const confirmedIds = new Set();   // 「伝票番号登録済み・要確認」で、未発送の確認にOKした注文
@@ -426,8 +431,29 @@ document.getElementById("printBtn").addEventListener("click", async () => {
   msg.textContent = done;
 });
 
+/** 未処理の注文の梱包資材(目安)の件数。メール便は厚み別（1cm/2cm/3cm。寸法が無ければ「厚み不明」） */
+function packageSummary(orders) {
+  const mail = { "1cm": 0, "2cm": 0, "3cm": 0, "厚み不明": 0 }, other = new Map();
+  let mailTotal = 0;
+  orders.filter(o => o.status === "未処理" && (o.items || []).length).forEach(o => {
+    const pkg = estimatePackage(o.items);
+    if (pkg.name === window.APP_CONFIG.MAIL_NAME) { mail[mailThicknessClass(pkg)]++; mailTotal++; }
+    else other.set(pkg.name, (other.get(pkg.name) || 0) + 1);
+  });
+  return { mail, mailTotal, other };
+}
+function pkgSumHtml(s) {
+  const mail = ["1cm", "2cm", "3cm", "厚み不明"].filter(k => k !== "厚み不明" || s.mail[k])
+    .map(k => `<span>${k}:<b>${s.mail[k]}</b>件</span>`).join("");
+  const other = [...s.other].map(([k, n]) => `${escapeHtml(k)} ${n}件`).join("　");
+  return `<div class="pkg-sum">
+    <div class="mail">メール便 ${s.mailTotal}件 ― ${mail}</div>
+    ${other ? `<div class="other">メール便以外: ${other}</div>` : ""}
+  </div>`;
+}
+
 /* ---- ピッキングリスト（未処理の注文すべて。選択・印刷済みかに関係なく、自社出荷の商品の総量） ---- */
-function pickHtml(p, printedAt) {
+function pickHtml(p, printedAt, pkgSum) {
   const tags = r => (r.warnOrders.length ? `<span class="tag warn">要確認</span>` : "")
     + (r.unregistered ? `<span class="tag">商品マスタ未登録</span>` : "")
     + (r.shelves.length > 1 ? `<span class="tag">棚番号が複数</span>` : "");
@@ -455,6 +481,7 @@ function pickHtml(p, printedAt) {
     <div class="head"><h2>ピッキングリスト</h2>
       <div class="meta">印刷 ${escapeHtml(printedAt)}<br>未処理の注文 ${p.orderCount}件・自社出荷(毛呂山)の商品</div></div>
     ${notices.map(n => `<p class="notice">${escapeHtml(n)}</p>`).join("")}
+    ${pkgSumHtml(pkgSum)}
     <table>
       <thead><tr><th>取出</th><th>棚番号</th><th>商品名 / JAN</th><th style="text-align:right;">合計数量</th><th style="text-align:right;">注文数</th></tr></thead>
       <tbody>${rows}</tbody>
@@ -481,7 +508,7 @@ document.getElementById("pickBtn").addEventListener("click", async () => {
   const d = new Date();
   const p2 = n => String(n).padStart(2, "0");
   const printedAt = `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
-  document.getElementById("pickArea").innerHTML = pickHtml(p, printedAt);
+  document.getElementById("pickArea").innerHTML = pickHtml(p, printedAt, packageSummary(list.orders || []));
   document.body.classList.add("print-pick");
   window.print();
 });
