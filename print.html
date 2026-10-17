@@ -2,6 +2,8 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
+<!-- 版の番号（公開のたびに python tools/bump_version.py で上げる。index.html と同じ番号。下の .js の ?v= も同じ番号にそろう） -->
+<meta name="app-version" content="2026-10-18.1">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>出荷指示書の印刷</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js"></script>
@@ -122,6 +124,8 @@
   .loaded{font-size:13px;color:#5a6b66;margin:-4px 0 10px;}
   .loaded b{color:var(--ink);}
   .loaded.stale{color:#8a5a00;font-weight:700;}
+  .ver{font-size:12px;color:#6b7c78;margin:2px 0 6px;}
+  .ver.ng{color:var(--ng);background:var(--ng-bg);font-weight:bold;padding:6px 8px;border-radius:6px;font-size:14px;}
 </style>
 </head>
 <body>
@@ -143,6 +147,7 @@
     <span class="count" id="count"></span>
   </div>
   <div class="loaded" id="loadedAt"></div>
+  <div class="ver" id="verLabel"></div>
   <div class="msg" id="msg"></div>
   <table class="list">
     <thead><tr><th></th><th>注文日時</th><th>注文番号</th><th>チャネル</th><th>お届け先</th><th>商品（セットは単品に展開済み）</th><th>梱包資材(目安)</th><th>印刷日時</th><th>警告</th></tr></thead>
@@ -152,11 +157,35 @@
 <div id="printArea"></div>
 <div id="pickArea"></div>
 
-<script src="config.js"></script>
-<script src="common.js"></script>
-<script src="picklist.js"></script>
+<script src="config.js?v=2026-10-18.1"></script>
+<script src="common.js?v=2026-10-18.1"></script>
+<script src="picklist.js?v=2026-10-18.1"></script>
 <script>
 const { apiGet, apiPost, estimatePackage, mailThicknessClass, escapeHtml, isConfirmableWarning, isBlockingWarning } = window.Common;
+
+/* ---------- 版の番号: 読み込んだ config.js / common.js がこのページと同じ版か ----------
+   ブラウザに古い common.js が残っていると、梱包資材(目安)が古い判定のまま出る（例: メール便で送れる注文が60サイズになる）。
+   そろっていなければ1回だけ読み込み直す。それでもそろわなければ赤く表示し、印刷を止める */
+const APP_VERSION = document.querySelector('meta[name="app-version"]').content;
+const FILE_VERSION_MISMATCH = ["config.js", "common.js"]
+  .filter(f => (window.APP_FILE_VERSIONS || {})[f] !== APP_VERSION)
+  .map(f => `${f}=${(window.APP_FILE_VERSIONS || {})[f] || "不明"}`);
+(function showVersion() {
+  const el = document.getElementById("verLabel");
+  if (!FILE_VERSION_MISMATCH.length) { el.textContent = `版 ${APP_VERSION}`; return; }
+  let tried = false;
+  try { tried = sessionStorage.getItem("printPageMismatchTried") === APP_VERSION; } catch (e) {}
+  if (!tried) {
+    try { sessionStorage.setItem("printPageMismatchTried", APP_VERSION); } catch (e) {}
+    el.textContent = "新しい版を読み込み直しています…";
+    location.replace(`${location.pathname}?v=${encodeURIComponent(APP_VERSION)}&r=${Date.now()}${location.hash}`);
+    return;
+  }
+  el.classList.add("ng");
+  el.textContent = `版がそろっていません（ページ ${APP_VERSION} / ${FILE_VERSION_MISMATCH.join(" / ")}）。`
+    + "梱包資材の判定が古い可能性があるため印刷できません。Ctrl+Shift+R で読み込み直してください";
+})();
+
 let allPending = [];   // 未処理の注文（注文日時の古い順）
 let shown = [];        // 表示中の注文
 const confirmedIds = new Set();   // 「伝票番号登録済み・要確認」で、未発送の確認にOKした注文
@@ -364,6 +393,7 @@ function layoutSheets(htmls, spans) {
 }
 
 document.getElementById("printBtn").addEventListener("click", async () => {
+  if (FILE_VERSION_MISMATCH.length) { alert("版がそろっていないため印刷できません。Ctrl+Shift+R で読み込み直してください"); return; }
   let list = selected();
   const msg = document.getElementById("msg");
   if (!list.length) { alert("印刷する注文を選択してください"); return; }
@@ -492,6 +522,7 @@ function pickHtml(p, printedAt, pkgSum) {
 }
 
 document.getElementById("pickBtn").addEventListener("click", async () => {
+  if (FILE_VERSION_MISMATCH.length) { alert("版がそろっていないため印刷できません。Ctrl+Shift+R で読み込み直してください"); return; }
   const msg = document.getElementById("msg");
   msg.textContent = "ピッキングリストを作っています…";
   let list, master;

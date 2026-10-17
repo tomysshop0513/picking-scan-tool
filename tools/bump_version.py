@@ -4,8 +4,9 @@
     python tools/bump_version.py
 
 - 版の番号は「日付.その日の連番」（例: 2026-10-12.1 → 同じ日にもう一度なら 2026-10-12.2）。日付は日本時間
-- 次の4か所を同じ番号にそろえる（スマホが古い config.js / common.js を混ぜて使わないように）
+- 次の場所を同じ番号にそろえる（スマホが古い config.js / common.js を混ぜて使わないように）
     index.html の <meta name="app-version"> / index.html の config.js?v= と common.js?v=
+    print.html の <meta name="app-version"> / print.html の config.js?v= ・common.js?v= ・picklist.js?v=
     config.js と common.js の中の版の番号（APP_FILE_VERSIONS）
 - 作業所のスマホは、公開された版の番号が新しければ、作業の区切りで自動で読み込み直す（index.html の checkForUpdate）
 - 上げ忘れは tools/check_version.py（main へ push するときに自動で実行）が止める
@@ -17,10 +18,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 META = re.compile(r'(<meta name="app-version" content=")([^"]+)(">)')
-SCRIPT = re.compile(r'(<script src="(?:config|common)\.js\?v=)([^"]+)(">)')
+SCRIPT = re.compile(r'(<script src="(?:config|common|picklist)\.js\?v=)([^"]+)(">)')
 MARK = re.compile(r'(\["(?:config|common)\.js"\] = ")([^"]+)(";)')
 # ファイル → (置き換える形, 想定の件数)
-TARGETS = {"index.html": [(META, 1), (SCRIPT, 2)], "config.js": [(MARK, 1)], "common.js": [(MARK, 1)]}
+TARGETS = {"index.html": [(META, 1), (SCRIPT, 2)], "print.html": [(META, 1), (SCRIPT, 3)], "config.js": [(MARK, 1)], "common.js": [(MARK, 1)]}
 
 
 def next_version(current: str) -> str:

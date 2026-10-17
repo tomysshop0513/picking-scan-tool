@@ -5,16 +5,17 @@
     python tools/check_version.py <前> <後>        # 2つのコミットを比べる
 
 確かめること:
-1. 照合ツールのファイル（index.html / config.js / common.js）が前と変わっているのに、版の番号が前より大きくなっていない → NG
-2. index.html の版の番号と、config.js?v= / common.js?v= / config.js・common.js の中の番号がそろっていない → NG
-3. index.html が読み込む自分のファイル（.js / .css）に ?v=版の番号 が付いていない → NG
+1. 照合ツール・出荷指示書のファイル（index.html / print.html / config.js / common.js / picklist.js）が前と変わっているのに、版の番号が前より大きくなっていない → NG
+2. index.html の版の番号と、print.html の版の番号・config.js?v= / common.js?v= / config.js・common.js の中の番号がそろっていない → NG
+3. index.html・print.html が読み込む自分のファイル（.js / .css）に ?v=版の番号 が付いていない → NG
 NG のときは、python tools/bump_version.py を実行してコミットし直す。
 """
 import re
 import subprocess
 import sys
 
-APP_FILES = ["index.html", "config.js", "common.js"]   # 照合ツールのスマホが読むファイル（変わったら版を上げる）
+APP_FILES = ["index.html", "print.html", "config.js", "common.js", "picklist.js"]   # 照合ツール・出荷指示書が読むファイル（変わったら版を上げる）
+PAGES = ["index.html", "print.html"]   # 版の番号(<meta name="app-version">)を持つページ
 META = re.compile(r'<meta name="app-version" content="([^"]+)">')
 MARK = re.compile(r'\["(config|common)\.js"\] = "([^"]+)";')
 LOCAL_REF = re.compile(r'<(?:script|link)\b[^>]*?(?:src|href)="(?!https?:|//|data:)([^"]+)"')
@@ -41,9 +42,13 @@ def check(base, head):
         return [f'index.html の版の番号（<meta name="app-version">）が「日付.連番」の形ではありません: {ver or "なし"}'], ""
 
     # 2・3. そろっているか
-    for ref in LOCAL_REF.findall(files["index.html"]):
-        if not ref.endswith(f"?v={ver}"):
-            errors.append(f"index.html が読み込む {ref} に ?v={ver} が付いていません")
+    pm = META.search(files["print.html"])
+    if not pm or pm.group(1) != ver:
+        errors.append(f"print.html の版の番号が {pm.group(1) if pm else 'なし'} です（index.html は {ver}）")
+    for page in PAGES:
+        for ref in LOCAL_REF.findall(files[page]):
+            if not ref.endswith(f"?v={ver}"):
+                errors.append(f"{page} が読み込む {ref} に ?v={ver} が付いていません")
     for name in ("config.js", "common.js"):
         marks = [v for f, v in MARK.findall(files[name]) if f + ".js" == name]
         if marks != [ver]:
